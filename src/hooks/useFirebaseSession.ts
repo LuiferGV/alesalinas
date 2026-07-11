@@ -17,9 +17,9 @@ function getAuthErrorMessage(error: unknown) {
 
   if (code === "auth/invalid-email") return "El email no tiene un formato valido.";
   if (code === "auth/invalid-credential") return "El email o la contrasena no coinciden.";
-  if (code === "auth/user-disabled") return "Este usuario fue deshabilitado en Firebase.";
+  if (code === "auth/user-disabled") return "Este usuario fue deshabilitado.";
   if (code === "auth/too-many-requests") return "Hay demasiados intentos. Espera un momento y prueba otra vez.";
-  return "No se pudo iniciar sesion. Revisa el email, la contrasena y la configuracion de Firebase.";
+  return "No se pudo iniciar sesion. Revisa el email, la contrasena y la configuracion del sistema.";
 }
 
 export function useFirebaseSession(): FirebaseSessionState {
@@ -42,9 +42,9 @@ export function useFirebaseSession(): FirebaseSessionState {
         setAuthError(null);
       },
       (error) => {
-        console.error("No se pudo validar la sesion de Firebase", error);
+        console.error("No se pudo validar la sesion", error);
         setSessionState("error");
-        setAuthError("No se pudo validar la sesion con Firebase.");
+        setAuthError("No se pudo validar la sesion.");
       }
     );
 

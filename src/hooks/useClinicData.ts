@@ -42,7 +42,7 @@ export function useClinicData(enabled: boolean): ClinicDataState {
     setFirebaseState("loading");
 
     const handleError = (error: Error) => {
-      console.error("No se pudo conectar con Firebase", error);
+      console.error("No se pudo conectar con la base actual", error);
       setFirebaseState("error");
     };
 

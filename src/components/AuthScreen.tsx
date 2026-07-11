@@ -1,4 +1,5 @@
 import type { FormEvent } from "react";
+import logoWhite from "../../zzzalewhite.png";
 import { clinicProfile } from "../lib/clinicProfile";
 
 interface AuthScreenProps {
@@ -22,20 +23,19 @@ export function AuthScreen({
   onPasswordChange,
   onSubmit
 }: AuthScreenProps) {
-  const [primaryInitial, secondaryInitial] = clinicProfile.brandInitials;
   const title =
-    sessionState === "not-configured" ? "Falta configurar Firebase" : "Acceso privado del consultorio";
+    sessionState === "not-configured" ? "Configuracion pendiente" : "Bienvenida";
   const subtitle =
     sessionState === "not-configured"
-      ? "Carga las variables de Firebase para usar la base real del sistema."
-      : "Ingresa con tu email y contrasena para abrir pacientes, atenciones, alertas y finanzas.";
+      ? "Faltan algunos datos para habilitar el acceso al sistema."
+      : "Ingresa con tu email y contrasena para entrar al panel.";
 
   const helperText =
     sessionState === "loading"
-      ? "Verificando si ya existe una sesion activa..."
+      ? "Comprobando si ya hay una sesion abierta..."
       : sessionState === "error"
-        ? "Firebase respondio con un problema de autenticacion."
-        : "Solo los usuarios autorizados pueden entrar al panel clinico.";
+        ? "No pudimos validar el acceso en este momento."
+        : "Acceso reservado para el consultorio.";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -48,28 +48,25 @@ export function AuthScreen({
 
       <section className="auth-stage">
         <div className="auth-hero">
-          <p className="eyebrow">{clinicProfile.appName}</p>
-          <div className="brand-mark brand-mark--hero" aria-hidden="true">
-            <span className="brand-mark__dark">{primaryInitial}</span>
-            <span className="brand-mark__gold">{secondaryInitial}</span>
-          </div>
+          <img className="auth-logo" src={logoWhite} alt={clinicProfile.appName} />
+          <p className="eyebrow">{clinicProfile.specialty}</p>
           <h1>{title}</h1>
           <p>{subtitle}</p>
           <div className="auth-highlights">
             <article className="quick-card">
-              <strong>Pacientes protegidos</strong>
-              <span>La base clinica solo se abre con autenticacion activa en Firebase.</span>
+              <strong>Pacientes y seguimientos</strong>
+              <span>Accede rapido a fichas, controles, alertas y notas del consultorio.</span>
             </article>
             <article className="quick-card">
-              <strong>Sincronizacion en tiempo real</strong>
-              <span>Todo lo que cargues quedara listo para seguir desde otro equipo o una nueva sesion.</span>
+              <strong>Finanzas y presupuestos</strong>
+              <span>Consulta cobros, gastos y presupuestos desde un mismo panel.</span>
             </article>
           </div>
         </div>
 
         <section className="auth-card">
           <p className="eyebrow">Ingreso</p>
-          <h2>Panel del consultorio</h2>
+          <h2>Iniciar sesion</h2>
           <p className="auth-card__subtitle">{helperText}</p>
 
           <form className="auth-form" onSubmit={handleSubmit}>

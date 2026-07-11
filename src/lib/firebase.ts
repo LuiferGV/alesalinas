@@ -36,7 +36,7 @@ export function hasRealtimeDatabaseConfig(): boolean {
 
 function ensureApp() {
   if (!hasFirebaseCoreConfig()) {
-    throw new Error("Falta la configuracion base de Firebase.");
+    throw new Error("Falta la configuracion base del sistema.");
   }
 
   return getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -55,7 +55,7 @@ function ensureAuth() {
 
 function ensureDatabase() {
   if (!hasRealtimeDatabaseConfig()) {
-    throw new Error("Falta databaseURL para conectar Realtime Database.");
+    throw new Error("Falta completar la conexion de datos del sistema.");
   }
 
   if (!databaseInstance) {

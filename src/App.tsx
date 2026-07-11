@@ -1,4 +1,5 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import logoWhite from "../zzzalewhite.png";
 import { AlertBoard } from "./components/AlertBoard";
 import { AttentionModal, type AttentionFormValues } from "./components/AttentionModal";
 import { AuthScreen } from "./components/AuthScreen";
@@ -355,11 +356,11 @@ function buildAttentionPayload(values: AttentionFormValues) {
 function getAttentionSuccessMessage(treatmentsCount: number, createdPatient: boolean, hasFollowUp: boolean) {
   const baseMessage = createdPatient
     ? treatmentsCount === 1
-      ? "Paciente nuevo y atencion guardados en Firebase."
-      : `Paciente nuevo y ${treatmentsCount} tratamientos guardados en Firebase.`
+      ? "Paciente nuevo y atencion guardados."
+      : `Paciente nuevo y ${treatmentsCount} tratamientos guardados.`
     : treatmentsCount === 1
-      ? "Atencion guardada en Firebase."
-      : `${treatmentsCount} tratamientos guardados en Firebase.`;
+      ? "Atencion guardada."
+      : `${treatmentsCount} tratamientos guardados.`;
 
   return hasFollowUp ? `${baseMessage} Control programado.` : baseMessage;
 }
@@ -511,7 +512,7 @@ export default function App() {
     return subscribeServerTimeOffset(
       (offsetMs) => setServerTimeOffsetMs(offsetMs),
       (error) => {
-        console.error("No se pudo leer la hora de referencia desde Firebase", error);
+        console.error("No se pudo leer la hora de referencia del sistema", error);
         setServerTimeOffsetMs(0);
       }
     );
@@ -668,23 +669,23 @@ export default function App() {
   ) => {
     if (!hasRealtimeDatabaseConfig()) {
       setSyncState("error");
-      setSyncMessage("Falta la configuracion de Realtime Database.");
+      setSyncMessage("Falta completar la configuracion del sistema.");
       onRollback?.();
       return;
     }
 
     setSyncState("saving");
-    setSyncMessage("Guardando en Firebase...");
+    setSyncMessage("Guardando cambios...");
 
     try {
       await operation();
       setSyncState("saved");
       setSyncMessage(successMessage);
     } catch (error) {
-      console.error("No se pudo guardar el cambio en Firebase", error);
+      console.error("No se pudo guardar el cambio", error);
       onRollback?.();
       setSyncState("error");
-      setSyncMessage("No se pudo guardar en Firebase.");
+      setSyncMessage("No se pudo guardar el cambio.");
     }
   };
 
@@ -848,7 +849,7 @@ export default function App() {
 
     void persistFirebaseChange(
       () => savePatient(normalized),
-      patientId ? "Ficha actualizada en Firebase." : "Paciente creado en Firebase.",
+      patientId ? "Ficha actualizada." : "Paciente creado.",
       () => {
         setClinicPatients(previousPatients);
         setSelectedPatientId(previousSelectedPatientId);
@@ -874,7 +875,7 @@ export default function App() {
 
     applyExpenseMutation(
       nextExpense,
-      expenseId ? "Gasto de marketing actualizado en Firebase." : "Gasto de marketing guardado en Firebase.",
+      expenseId ? "Gasto de marketing actualizado." : "Gasto de marketing guardado.",
       expenseId
     );
     setActiveView("marketing");
@@ -981,7 +982,7 @@ export default function App() {
             : [nextBudget, ...patient.budgets]
         )
       }),
-      budgetId ? "Presupuesto actualizado en Firebase." : "Presupuesto guardado en Firebase."
+      budgetId ? "Presupuesto actualizado." : "Presupuesto guardado."
     );
 
     setSelectedPatientId(targetPatientId);
@@ -1060,7 +1061,7 @@ export default function App() {
             finances: nextFinances
           };
         },
-        itemId ? "Atencion y cobro actualizados en Firebase." : "Atencion y cobro guardados en Firebase."
+        itemId ? "Atencion y cobro actualizados." : "Atencion y cobro guardados."
       );
     }
 
@@ -1086,7 +1087,7 @@ export default function App() {
               : [nextItem, ...patient.evolutions]
           )
         }),
-        itemId ? "Evolucion actualizada en Firebase." : "Evolucion guardada en Firebase."
+        itemId ? "Evolucion actualizada." : "Evolucion guardada."
       );
     }
 
@@ -1111,7 +1112,7 @@ export default function App() {
               : [nextItem, ...patient.followUps]
           )
         }),
-        itemId ? "Seguimiento actualizado en Firebase." : "Seguimiento guardado en Firebase."
+        itemId ? "Seguimiento actualizado." : "Seguimiento guardado."
       );
     }
 
@@ -1163,7 +1164,7 @@ export default function App() {
             treatments: syncTreatmentsFromFinances(patient.treatments, nextFinances)
           };
         },
-        itemId ? "Deuda actualizada en Firebase." : "Cargo guardado en Firebase."
+        itemId ? "Deuda actualizada." : "Cargo guardado."
       );
     }
 
@@ -1213,7 +1214,7 @@ export default function App() {
             treatments: syncTreatmentsFromFinances(patient.treatments, nextFinances)
           };
         },
-        "Pago registrado en Firebase."
+        "Pago registrado."
       );
     }
 
@@ -1240,7 +1241,7 @@ export default function App() {
               : [nextItem, ...patient.patientExpenses]
           )
         }),
-        itemId ? "Costo del paciente actualizado en Firebase." : "Costo del paciente guardado en Firebase."
+        itemId ? "Costo del paciente actualizado." : "Costo del paciente guardado."
       );
     }
 
@@ -1261,7 +1262,7 @@ export default function App() {
               : [nextItem, ...patient.notes]
           )
         }),
-        itemId ? "Nota actualizada en Firebase." : "Nota guardada en Firebase."
+        itemId ? "Nota actualizada." : "Nota guardada."
       );
     }
 
@@ -1286,7 +1287,7 @@ export default function App() {
 
       void persistFirebaseChange(
         () => deletePatientRecord(deleteIntent.patientId),
-        "Ficha eliminada de Firebase.",
+        "Ficha eliminada.",
         () => {
           setClinicPatients(previousPatients);
           setSelectedPatientId(previousSelectedPatientId);
@@ -1304,7 +1305,7 @@ export default function App() {
 
       void persistFirebaseChange(
         () => deleteExpenseRecord(deleteIntent.expenseId),
-        "Gasto de marketing eliminado de Firebase.",
+        "Gasto de marketing eliminado.",
         () => setClinicExpenses(previousExpenses)
       );
       return;
@@ -1328,7 +1329,7 @@ export default function App() {
             patientExpenses: patient.patientExpenses.filter((entry) => entry.linkedTreatmentId !== itemId)
           };
         },
-        "Atencion eliminada de Firebase."
+        "Atencion eliminada."
       );
     }
 
@@ -1339,7 +1340,7 @@ export default function App() {
           ...patient,
           evolutions: patient.evolutions.filter((item) => item.id !== itemId)
         }),
-        "Evolucion eliminada de Firebase."
+        "Evolucion eliminada."
       );
     }
 
@@ -1350,7 +1351,7 @@ export default function App() {
           ...patient,
           followUps: patient.followUps.filter((item) => item.id !== itemId)
         }),
-        "Seguimiento eliminado de Firebase."
+        "Seguimiento eliminado."
       );
     }
 
@@ -1361,7 +1362,7 @@ export default function App() {
           ...patient,
           budgets: patient.budgets.filter((item) => item.id !== itemId)
         }),
-        "Presupuesto eliminado de Firebase."
+        "Presupuesto eliminado."
       );
     }
 
@@ -1372,7 +1373,7 @@ export default function App() {
           ...patient,
           finances: patient.finances.filter((item) => item.id !== itemId)
         }),
-        "Movimiento eliminado de Firebase."
+        "Movimiento eliminado."
       );
     }
 
@@ -1383,7 +1384,7 @@ export default function App() {
           ...patient,
           patientExpenses: patient.patientExpenses.filter((item) => item.id !== itemId)
         }),
-        "Costo del paciente eliminado de Firebase."
+        "Costo del paciente eliminado."
       );
     }
 
@@ -1394,7 +1395,7 @@ export default function App() {
           ...patient,
           notes: patient.notes.filter((item) => item.id !== itemId)
         }),
-        "Nota eliminada de Firebase."
+        "Nota eliminada."
       );
     }
 
@@ -2262,15 +2263,10 @@ export default function App() {
 
       <header className="topbar">
         <div className="topbar__brand topbar__brand--logo">
-          <div className="brand-mark brand-mark--compact" aria-hidden="true">
-            <span className="brand-mark__dark">{clinicProfile.brandInitials[0]}</span>
-            <span className="brand-mark__gold">{clinicProfile.brandInitials[1]}</span>
-          </div>
+          <img className="brand-logo" src={logoWhite} alt={clinicProfile.appName} />
 
           <div className="topbar__brand-copy">
             <p className="eyebrow">{clinicProfile.specialty}</p>
-            <h1>{clinicProfile.appName}</h1>
-            <p className="topbar__subtitle">Sistema clinico conectado a Firebase y listo para una base nueva.</p>
           </div>
         </div>
 
