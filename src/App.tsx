@@ -46,8 +46,10 @@ import {
 import {
   formatGs,
   formatMonthRangeLabel,
+  getParaguayPhoneSearchTerms,
   getMonthKey,
-  normalizeMonthRange
+  normalizeMonthRange,
+  normalizeParaguayPhone
 } from "./lib/date";
 import { getMarketingDashboardData } from "./lib/marketing";
 import {
@@ -123,9 +125,10 @@ function filterPatients(
 
       if (!normalized) return true;
 
+      const phoneSearchText = getParaguayPhoneSearchTerms(patient.phone).join(" ");
       const searchable = `${patient.fullName} ${patient.phone} ${patient.treatments
         .map((treatment) => treatment.practitioner)
-        .join(" ")}`.toLowerCase();
+        .join(" ")} ${phoneSearchText}`.toLowerCase();
 
       return searchable.includes(normalized);
     })
@@ -417,7 +420,7 @@ function defaultPatientValues(patient?: Patient) {
 function patientFields(): ModalField[] {
   return [
     { name: "fullName", label: "Nombre y apellido", type: "text", required: true, placeholder: "Ej.: Juan Perez" },
-    { name: "phone", label: "Telefono", type: "tel", required: true, placeholder: "+595981123456" },
+    { name: "phone", label: "Telefono", type: "tel", required: true, placeholder: "Ej.: 0981885999" },
     { name: "birthDate", label: "Fecha de nacimiento", type: "date" },
     { name: "occupation", label: "Ocupacion", type: "text", placeholder: "Ej.: Arquitecta" },
     { name: "city", label: "Ciudad", type: "text", placeholder: "Ej.: Asuncion" },
@@ -816,7 +819,7 @@ export default function App() {
     const basePatient: Patient = {
       id: patientId ?? createId("patient"),
       fullName: values.fullName.trim(),
-      phone: values.phone.trim(),
+      phone: normalizeParaguayPhone(values.phone),
       createdAt: existingPatient?.createdAt ?? todayKey(),
       birthDate: values.birthDate || "",
       lastVisit: existingPatient?.lastVisit ?? null,
@@ -905,7 +908,7 @@ export default function App() {
         normalizePatientPractitioners({
           id: createId("patient"),
           fullName: quickName,
-          phone: values.quickPatientPhone.trim(),
+          phone: normalizeParaguayPhone(values.quickPatientPhone),
           createdAt: referenceDate,
           birthDate: "",
           lastVisit: null,

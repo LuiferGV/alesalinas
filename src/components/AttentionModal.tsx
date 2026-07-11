@@ -5,6 +5,7 @@ import {
   getSuggestedFollowUpLabel
 } from "../lib/followUpRules";
 import { clinicProfile } from "../lib/clinicProfile";
+import { getParaguayPhoneSearchTerms } from "../lib/date";
 import type { TreatmentStatus } from "../types/clinic";
 
 interface PatientOption {
@@ -111,9 +112,13 @@ export function AttentionModal({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [onClose]);
 
-  const filteredPatients = patientOptions.filter((option) =>
-    option.label.toLowerCase().includes(patientDraft.trim().toLowerCase())
-  );
+  const filteredPatients = patientOptions.filter((option) => {
+    const normalizedDraft = patientDraft.trim().toLowerCase();
+    const draftTerms = getParaguayPhoneSearchTerms(patientDraft);
+    const optionSearchText = `${option.label.toLowerCase()} ${getParaguayPhoneSearchTerms(option.label).join(" ")}`;
+
+    return optionSearchText.includes(normalizedDraft) || draftTerms.some((term) => optionSearchText.includes(term));
+  });
   const suggestedFollowUp = useMemo(
     () => getSuggestedFollowUpFromAttention(values.items, values.date),
     [values.date, values.items]
@@ -356,7 +361,7 @@ export function AttentionModal({
                       <input
                         type="tel"
                         value={values.quickPatientPhone}
-                        placeholder="Opcional por ahora"
+                        placeholder="Ej.: 0981885999"
                         onChange={(event) =>
                           setValues((current) => ({
                             ...current,

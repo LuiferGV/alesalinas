@@ -2,6 +2,7 @@ import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
 import { getDatabase, onValue, ref, remove, set } from "firebase/database";
 import { normalizeBudgetStatus, sortBudgetsByDateDesc, syncBudgetEntry } from "./budgets";
+import { normalizeParaguayPhone } from "./date";
 import { createLegacyPayments, sortFinancesByActivity, syncFinanceEntry } from "./financeEntries";
 import type { Expense, ExpenseScope, FinanceTone, Patient } from "../types/clinic";
 
@@ -179,7 +180,7 @@ function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): P
   return {
     id: rawId,
     fullName: String(rawPatient.fullName || rawPatient.name || "Paciente sin nombre"),
-    phone: String(rawPatient.phone || ""),
+    phone: normalizeParaguayPhone(String(rawPatient.phone || "")),
     createdAt: String(rawPatient.createdAt || new Date().toISOString().slice(0, 10)).slice(0, 10),
     birthDate: String(rawPatient.birthDate || ""),
     lastVisit: rawPatient.lastVisit ? String(rawPatient.lastVisit).slice(0, 10) : null,

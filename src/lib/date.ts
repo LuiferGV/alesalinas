@@ -115,7 +115,35 @@ export function formatMonthRangeLabel(range: MonthRange): string {
   return `${shortMonthYearFormatter.format(startDate)} - ${shortMonthYearFormatter.format(endDate)}`;
 }
 
-export function buildWhatsAppLink(phone: string): string {
+export function normalizeParaguayPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
+  if (!digits) return "";
+
+  if (digits.startsWith("595")) {
+    return `+${digits}`;
+  }
+
+  if (digits.startsWith("0") && digits.length >= 10) {
+    return `+595${digits.slice(1)}`;
+  }
+
+  if (digits.length === 9) {
+    return `+595${digits}`;
+  }
+
+  return phone.trim().startsWith("+") ? phone.trim() : `+${digits}`;
+}
+
+export function getParaguayPhoneSearchTerms(phone: string): string[] {
+  const rawValue = phone.trim().toLowerCase();
+  const normalized = normalizeParaguayPhone(phone).toLowerCase();
+  const digits = normalized.replace(/\D/g, "");
+  const localDigits = digits.startsWith("595") ? `0${digits.slice(3)}` : digits;
+
+  return Array.from(new Set([rawValue, normalized, digits, localDigits].filter(Boolean)));
+}
+
+export function buildWhatsAppLink(phone: string): string {
+  const digits = normalizeParaguayPhone(phone).replace(/\D/g, "");
   return `https://wa.me/${digits}`;
 }
