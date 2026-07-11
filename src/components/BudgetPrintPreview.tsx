@@ -89,7 +89,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
         margin: 0;
         padding: 0;
         background: #ffffff;
-        color: #17324a;
+        color: #301322;
         font-family: "Segoe UI", Arial, sans-serif;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -137,12 +137,12 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
       }
 
       .brand-mark-gold {
-        color: #c9951b;
+        color: #d487ab;
       }
 
       .eyebrow {
         margin: 0;
-        color: #525252;
+        color: #876579;
         font-size: 3.2mm;
         font-weight: 800;
         text-transform: uppercase;
@@ -169,7 +169,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
         justify-items: end;
         gap: 2mm;
         text-align: right;
-        color: #454545;
+        color: #6f5264;
         font-size: 3.8mm;
         line-height: 1.35;
       }
@@ -205,15 +205,15 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
         gap: 1.5mm;
         padding: 4mm;
         border-radius: 4mm;
-        border: 0.35mm solid #d8d8d8;
-        background: #f4f4f4;
+        border: 0.35mm solid #ead8e2;
+        background: #fbf4f8;
       }
 
       .meta-card span,
       .meta-card small,
       .notes span,
       .totals span {
-        color: #5b5b5b;
+        color: #7f6573;
       }
 
       .meta-card strong {
@@ -226,7 +226,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
         margin-top: 6mm;
         border-radius: 4mm;
         overflow: hidden;
-        border: 0.35mm solid #d2d2d2;
+        border: 0.35mm solid #e4d4de;
       }
 
       .budget-table-head,
@@ -236,7 +236,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
       }
 
       .budget-table-head {
-        background: #121212;
+        background: #402434;
         color: #ffffff;
         font-size: 2.75mm;
         font-weight: 800;
@@ -248,7 +248,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
       .budget-row span,
       .budget-row strong {
         padding: 3.4mm 4mm;
-        border-right: 0.3mm solid #d8d8d8;
+        border-right: 0.3mm solid #e4d4de;
       }
 
       .budget-table-head span {
@@ -267,7 +267,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
 
       .budget-row {
         min-height: 12mm;
-        border-top: 0.3mm solid #d8d8d8;
+        border-top: 0.3mm solid #e4d4de;
         background: #ffffff;
         font-size: 4mm;
       }
@@ -293,7 +293,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
 
       .notes p {
         margin: 0;
-        color: #222222;
+        color: #3a2330;
         line-height: 1.55;
         font-size: 4mm;
       }
@@ -316,7 +316,7 @@ function buildPrintDocument(patient: Patient, budget: BudgetEntry, rows: ReturnT
         grid-template-columns: 1fr;
         gap: 2mm;
         padding-top: 3mm;
-        border-top: 0.3mm solid #d2d2d2;
+        border-top: 0.3mm solid #e4d4de;
       }
 
       .totals .grand strong {
