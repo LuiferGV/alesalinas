@@ -70,6 +70,8 @@ const followUpTypes = [
   "Retiro de puntos",
   "Control postoperatorio",
   "Reevaluacion periodontal",
+  "Ortodoncia",
+  "Alineadores",
   "Mantenimiento 6 meses",
   "Otro"
 ];

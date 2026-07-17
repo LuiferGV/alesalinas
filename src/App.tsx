@@ -1493,6 +1493,8 @@ export default function App() {
             "Control postquirurgico",
             "Retiro de puntos",
             "Reevaluacion periodontal",
+            "Ortodoncia",
+            "Alineadores",
             "Mantenimiento 6 meses",
             "Otro"
           ]
