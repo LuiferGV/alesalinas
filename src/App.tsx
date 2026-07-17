@@ -1429,7 +1429,18 @@ export default function App() {
           name: "category",
           label: "Categoria",
           type: "select",
-          options: ["Consulta", "Periodoncia", "Operatoria", "Endodoncia", "Cirugia", "Implantes", "Control", "Otro"]
+          options: [
+            "Consulta",
+            "Periodoncia",
+            "Operatoria",
+            "Endodoncia",
+            "Cirugia",
+            "Implantes",
+            "Ortodoncia",
+            "Alineadores",
+            "Control",
+            "Otro"
+          ]
         },
         { name: "detail", label: "Tratamiento realizado", type: "text", required: true },
         {

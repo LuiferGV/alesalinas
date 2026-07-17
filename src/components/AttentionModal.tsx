@@ -52,7 +52,18 @@ interface AttentionModalProps {
   onClose: () => void;
 }
 
-const categories = ["Consulta", "Periodoncia", "Operatoria", "Endodoncia", "Cirugia", "Implantes", "Control", "Otro"];
+const categories = [
+  "Consulta",
+  "Periodoncia",
+  "Operatoria",
+  "Endodoncia",
+  "Cirugia",
+  "Implantes",
+  "Ortodoncia",
+  "Alineadores",
+  "Control",
+  "Otro"
+];
 const statuses: TreatmentStatus[] = ["Realizado", "Planificado", "Control pendiente", "Cancelado"];
 const followUpTypes = [
   "Control general",
