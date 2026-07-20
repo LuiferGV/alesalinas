@@ -1438,6 +1438,7 @@ export default function App() {
             "Implantes",
             "Ortodoncia",
             "Alineadores",
+            "Odontopediatria",
             "Control",
             "Otro"
           ]
@@ -1495,6 +1496,7 @@ export default function App() {
             "Reevaluacion periodontal",
             "Ortodoncia",
             "Alineadores",
+            "Odontopediatria",
             "Mantenimiento 6 meses",
             "Otro"
           ]

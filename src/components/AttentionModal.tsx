@@ -61,6 +61,7 @@ const categories = [
   "Implantes",
   "Ortodoncia",
   "Alineadores",
+  "Odontopediatria",
   "Control",
   "Otro"
 ];
@@ -72,6 +73,7 @@ const followUpTypes = [
   "Reevaluacion periodontal",
   "Ortodoncia",
   "Alineadores",
+  "Odontopediatria",
   "Mantenimiento 6 meses",
   "Otro"
 ];
