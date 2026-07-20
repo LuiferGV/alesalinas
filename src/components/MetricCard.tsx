@@ -2,7 +2,7 @@ interface MetricCardProps {
   label: string;
   value: string;
   detail: string;
-  tone: "obsidian" | "gold" | "emerald" | "ruby";
+  tone: "obsidian" | "gold" | "emerald" | "ruby" | "sand";
   onClick?: () => void;
   active?: boolean;
 }

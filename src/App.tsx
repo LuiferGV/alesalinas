@@ -2210,10 +2210,16 @@ export default function App() {
           <div className="status-pill status-pill--neutral">{activeAlertsCount} alertas activas</div>
         </section>
 
-        <section className="metrics-grid">
+        <section className="metrics-grid metrics-grid--home">
           <MetricCard label="Pacientes cargados" value={String(metrics.patientsCount)} detail="Base activa del consultorio" tone="obsidian" />
           <MetricCard label="Tratamientos del periodo" value={String(metrics.treatmentsCount)} detail="Atenciones registradas en el periodo" tone="gold" />
           <MetricCard label="Cobrado del periodo" value={formatGs(metrics.incomeAmount)} detail="Ingresos ya percibidos" tone="emerald" />
+          <MetricCard
+            label="Gastos del periodo"
+            value={formatGs(metrics.expensesAmount)}
+            detail={`${periodExpenses.length} costo(s) y egreso(s) cargados`}
+            tone="sand"
+          />
           <MetricCard
             label="Pendiente del periodo"
             value={formatGs(metrics.pendingAmount)}

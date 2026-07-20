@@ -639,6 +639,11 @@ a {
   color: #26110f;
 }
 
+.metric-card--sand {
+  background: linear-gradient(155deg, rgba(255, 244, 226, 0.98), rgba(255, 169, 140, 0.92));
+  color: #26110f;
+}
+
 .metric-card--obsidian {
   background: linear-gradient(155deg, rgba(22, 34, 48, 0.98), rgba(11, 20, 29, 0.96));
   color: #eff8ff;
@@ -2336,6 +2341,10 @@ a {
 
   .metrics-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .metrics-grid--home {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 }
 
