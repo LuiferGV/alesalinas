@@ -3,7 +3,7 @@ import { MetricCard } from "./MetricCard";
 import { formatDate, formatGs } from "../lib/date";
 import type { Expense } from "../types/clinic";
 
-type FinancePanel = "income" | "pending" | "expenses" | "net" | null;
+export type FinancePanel = "income" | "pending" | "expenses" | "net";
 
 interface PendingCollectionItem {
   patientId: string;
@@ -31,6 +31,7 @@ interface PeriodFinancialsProps {
   collectedEntries: CollectedItem[];
   expenses: Expense[];
   onOpenPatient: (patientId: string) => void;
+  initialPanel?: FinancePanel | null;
 }
 
 export function PeriodFinancials({
@@ -41,9 +42,10 @@ export function PeriodFinancials({
   pendingCollections,
   collectedEntries,
   expenses,
-  onOpenPatient
+  onOpenPatient,
+  initialPanel = null
 }: PeriodFinancialsProps) {
-  const [activePanel, setActivePanel] = useState<FinancePanel>(null);
+  const [activePanel, setActivePanel] = useState<FinancePanel | null>(initialPanel);
 
   const togglePanel = (panel: Exclude<FinancePanel, null>) => {
     setActivePanel((current) => (current === panel ? null : panel));

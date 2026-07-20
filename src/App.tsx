@@ -11,7 +11,7 @@ import { MarketingDashboard } from "./components/MarketingDashboard";
 import { MetricCard } from "./components/MetricCard";
 import { PatientRoster } from "./components/PatientRoster";
 import { PatientWorkspace, type RecordKind } from "./components/PatientWorkspace";
-import { PeriodFinancials } from "./components/PeriodFinancials";
+import { PeriodFinancials, type FinancePanel } from "./components/PeriodFinancials";
 import { useClinicData } from "./hooks/useClinicData";
 import { useFirebaseSession } from "./hooks/useFirebaseSession";
 import {
@@ -489,6 +489,8 @@ export default function App() {
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [activeAlertFilter, setActiveAlertFilter] = useState<AlertFilter>("all");
   const [activeView, setActiveView] = useState<MainView>("home");
+  const [initialFinancePanel, setInitialFinancePanel] = useState<FinancePanel | null>(null);
+  const [financeViewKey, setFinanceViewKey] = useState(0);
   const [modalState, setModalState] = useState<ModalState>(null);
   const [deleteIntent, setDeleteIntent] = useState<DeleteIntent>(null);
   const [loginEmail, setLoginEmail] = useState<string>(clinicProfile.loginEmail);
@@ -731,6 +733,14 @@ export default function App() {
       setActiveDoctorFilter("all");
       setActiveView("patients");
       setSelectedPatientId(patientId);
+    });
+  };
+
+  const openFinanceView = (panel: FinancePanel | null = null) => {
+    startTransition(() => {
+      setInitialFinancePanel(panel);
+      setFinanceViewKey((current) => current + 1);
+      setActiveView("finance");
     });
   };
 
@@ -2163,6 +2173,7 @@ export default function App() {
       return (
         <section className="single-column">
           <PeriodFinancials
+            key={`finance-${financeViewKey}`}
             incomeAmount={metrics.incomeAmount}
             pendingAmount={metrics.pendingAmount}
             expensesAmount={metrics.expensesAmount}
@@ -2171,6 +2182,7 @@ export default function App() {
             collectedEntries={collectedEntries}
             expenses={periodExpenses}
             onOpenPatient={handleOpenPatient}
+            initialPanel={initialFinancePanel}
           />
         </section>
       );
@@ -2213,18 +2225,26 @@ export default function App() {
         <section className="metrics-grid metrics-grid--home">
           <MetricCard label="Pacientes cargados" value={String(metrics.patientsCount)} detail="Base activa del consultorio" tone="obsidian" />
           <MetricCard label="Tratamientos del periodo" value={String(metrics.treatmentsCount)} detail="Atenciones registradas en el periodo" tone="gold" />
-          <MetricCard label="Cobrado del periodo" value={formatGs(metrics.incomeAmount)} detail="Ingresos ya percibidos" tone="emerald" />
+          <MetricCard
+            label="Cobrado del periodo"
+            value={formatGs(metrics.incomeAmount)}
+            detail={`${collectedEntries.length} cobro(s) en el periodo. Toca para ver de que pacientes salen`}
+            tone="emerald"
+            onClick={() => openFinanceView("income")}
+          />
           <MetricCard
             label="Gastos del periodo"
             value={formatGs(metrics.expensesAmount)}
-            detail={`${periodExpenses.length} costo(s) y egreso(s) cargados`}
+            detail={`${periodExpenses.length} costo(s) y egreso(s) cargados. Toca para ver el detalle`}
             tone="sand"
+            onClick={() => openFinanceView("expenses")}
           />
           <MetricCard
             label="Pendiente del periodo"
             value={formatGs(metrics.pendingAmount)}
-            detail={`${metrics.pendingCases} caso(s) con saldo abierto`}
+            detail={`${metrics.pendingCases} caso(s) con saldo abierto. Toca para ver el origen`}
             tone="ruby"
+            onClick={() => openFinanceView("pending")}
           />
         </section>
 
@@ -2255,7 +2275,7 @@ export default function App() {
             </p>
           </button>
 
-          <button type="button" className="action-tile action-tile--finance" onClick={() => setActiveView("finance")}>
+          <button type="button" className="action-tile action-tile--finance" onClick={() => openFinanceView()}>
             <div className="action-tile__header">
               <div>
                 <p className="eyebrow">Finanzas</p>
@@ -2324,7 +2344,7 @@ export default function App() {
             <button
               type="button"
               className={`nav-toggle ${activeView === "finance" ? "is-active" : ""}`}
-              onClick={() => setActiveView("finance")}
+              onClick={() => openFinanceView()}
             >
               Finanzas
             </button>
