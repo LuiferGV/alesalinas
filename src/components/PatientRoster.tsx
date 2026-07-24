@@ -183,7 +183,10 @@ export function PatientRoster({
                   <button type="button" className="patient-row__main" onClick={() => onSelectPatient(patient.id)}>
                     <div className="patient-row__primary">
                       <strong>{patient.fullName}</strong>
-                      <span>{patient.phone}</span>
+                      <span>
+                        {patient.phone}
+                        {patient.cedula ? ` | CI ${patient.cedula}` : ""}
+                      </span>
                     </div>
 
                     <div className="patient-row__cell">

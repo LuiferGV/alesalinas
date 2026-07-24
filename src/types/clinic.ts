@@ -136,6 +136,7 @@ export interface Patient {
   id: string;
   fullName: string;
   phone: string;
+  cedula: string;
   createdAt: string;
   birthDate: string;
   lastVisit: string | null;

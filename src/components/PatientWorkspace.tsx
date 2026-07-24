@@ -153,6 +153,10 @@ export function PatientWorkspace({
           <strong>{patient.phone}</strong>
         </article>
         <article className="profile-chip">
+          <span>Cedula</span>
+          <strong>{patient.cedula || "Sin cargar"}</strong>
+        </article>
+        <article className="profile-chip">
           <span>Ultima atencion</span>
           <strong>{formatDate(patient.lastVisit)}</strong>
         </article>

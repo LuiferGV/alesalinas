@@ -126,9 +126,10 @@ function filterPatients(
       if (!normalized) return true;
 
       const phoneSearchText = getParaguayPhoneSearchTerms(patient.phone).join(" ");
+      const cedulaSearchText = patient.cedula.replace(/\D/g, "");
       const searchable = `${patient.fullName} ${patient.phone} ${patient.treatments
         .map((treatment) => treatment.practitioner)
-        .join(" ")} ${phoneSearchText}`.toLowerCase();
+        .join(" ")} ${phoneSearchText} ${patient.cedula} ${cedulaSearchText}`.toLowerCase();
 
       return searchable.includes(normalized);
     })
@@ -409,6 +410,7 @@ function defaultPatientValues(patient?: Patient) {
   return {
     fullName: patient?.fullName ?? "",
     phone: patient?.phone ?? "",
+    cedula: patient?.cedula ?? "",
     birthDate: patient?.birthDate ?? "",
     occupation: patient?.occupation ?? "",
     city: patient?.city ?? "",
@@ -421,6 +423,7 @@ function patientFields(): ModalField[] {
   return [
     { name: "fullName", label: "Nombre y apellido", type: "text", required: true, placeholder: "Ej.: Juan Perez" },
     { name: "phone", label: "Telefono", type: "tel", required: true, placeholder: "Ej.: 0981885999" },
+    { name: "cedula", label: "Cedula de identidad", type: "text", placeholder: "Ej.: 1234567" },
     { name: "birthDate", label: "Fecha de nacimiento", type: "date" },
     { name: "occupation", label: "Ocupacion", type: "text", placeholder: "Ej.: Arquitecta" },
     { name: "city", label: "Ciudad", type: "text", placeholder: "Ej.: Asuncion" },
@@ -627,7 +630,10 @@ export default function App() {
     () =>
       [...clinicPatients]
         .sort((left, right) => left.fullName.localeCompare(right.fullName))
-        .map((patient) => ({ value: patient.id, label: `${patient.fullName} - ${patient.phone}` })),
+        .map((patient) => ({
+          value: patient.id,
+          label: `${patient.fullName} - ${patient.phone}${patient.cedula ? ` - CI ${patient.cedula}` : ""}`
+        })),
     [clinicPatients]
   );
 
@@ -830,6 +836,7 @@ export default function App() {
       id: patientId ?? createId("patient"),
       fullName: values.fullName.trim(),
       phone: normalizeParaguayPhone(values.phone),
+      cedula: values.cedula.trim(),
       createdAt: existingPatient?.createdAt ?? todayKey(),
       birthDate: values.birthDate || "",
       lastVisit: existingPatient?.lastVisit ?? null,
@@ -919,6 +926,7 @@ export default function App() {
           id: createId("patient"),
           fullName: quickName,
           phone: normalizeParaguayPhone(values.quickPatientPhone),
+          cedula: "",
           createdAt: referenceDate,
           birthDate: "",
           lastVisit: null,

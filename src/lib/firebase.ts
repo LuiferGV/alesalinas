@@ -181,6 +181,7 @@ function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): P
     id: rawId,
     fullName: String(rawPatient.fullName || rawPatient.name || "Paciente sin nombre"),
     phone: normalizeParaguayPhone(String(rawPatient.phone || "")),
+    cedula: String(rawPatient.cedula || rawPatient.identityNumber || rawPatient.idNumber || ""),
     createdAt: String(rawPatient.createdAt || new Date().toISOString().slice(0, 10)).slice(0, 10),
     birthDate: String(rawPatient.birthDate || ""),
     lastVisit: rawPatient.lastVisit ? String(rawPatient.lastVisit).slice(0, 10) : null,
