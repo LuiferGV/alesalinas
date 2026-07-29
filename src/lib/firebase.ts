@@ -207,9 +207,30 @@ function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): P
   };
 }
 
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item)) as T;
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, nestedValue]) => nestedValue !== undefined)
+        .map(([key, nestedValue]) => [key, stripUndefinedDeep(nestedValue)])
+    ) as T;
+  }
+
+  return value;
+}
+
 function serializePatient(patient: Patient): Omit<Patient, "id"> {
   const { id: _id, ...patientPayload } = patient;
-  return patientPayload;
+  return stripUndefinedDeep(patientPayload);
+}
+
+function serializeExpense(expense: Expense): Omit<Expense, "id"> {
+  const { id: _id, ...expensePayload } = expense;
+  return stripUndefinedDeep(expensePayload);
 }
 
 export function subscribeAuth(
@@ -299,8 +320,7 @@ export async function deletePatient(patientId: string) {
 
 export async function saveExpense(expense: Expense) {
   const database = ensureDatabase();
-  const { id, ...expensePayload } = expense;
-  await set(ref(database, `odontologia/egresos/${id}`), expensePayload);
+  await set(ref(database, `odontologia/egresos/${expense.id}`), serializeExpense(expense));
 }
 
 export async function deleteExpense(expenseId: string) {
