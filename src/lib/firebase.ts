@@ -1,5 +1,13 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  type User
+} from "firebase/auth";
 import { getDatabase, onValue, ref, remove, set } from "firebase/database";
 import { normalizeBudgetStatus, sortBudgetsByDateDesc, syncBudgetEntry } from "./budgets";
 import { normalizeParaguayPhone } from "./date";
@@ -244,6 +252,16 @@ export function subscribeAuth(
 export async function signIn(email: string, password: string) {
   const auth = ensureAuth();
   return signInWithEmailAndPassword(auth, email, password);
+}
+
+export async function registerWithEmail(email: string, password: string) {
+  const auth = ensureAuth();
+  return createUserWithEmailAndPassword(auth, email, password);
+}
+
+export async function sendResetPasswordEmail(email: string) {
+  const auth = ensureAuth();
+  return sendPasswordResetEmail(auth, email);
 }
 
 export async function signOutSession() {

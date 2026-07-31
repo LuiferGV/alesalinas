@@ -2163,17 +2163,37 @@ a {
   margin-top: 8px;
 }
 
+.auth-form__actions {
+  display: grid;
+  gap: 10px;
+}
+
 .auth-form__submit {
   width: 100%;
 }
 
-.auth-form__error {
+.auth-form__message {
   margin: 0;
   padding: 12px 14px;
   border-radius: 16px;
+}
+
+.auth-form__message--error {
   border: 1px solid rgba(255, 141, 117, 0.24);
   background: rgba(255, 141, 117, 0.12);
   color: #ffb4a6;
+}
+
+.auth-form__message--success {
+  border: 1px solid rgba(84, 224, 196, 0.24);
+  background: rgba(84, 224, 196, 0.12);
+  color: #aaf5e6;
+}
+
+.auth-form__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
 }
 
 .quick-card {

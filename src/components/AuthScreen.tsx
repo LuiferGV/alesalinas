@@ -6,22 +6,30 @@ interface AuthScreenProps {
   email: string;
   password: string;
   sessionState: "not-configured" | "loading" | "signed-out" | "error";
-  authError: string | null;
+  authMessage: string | null;
+  authMessageTone: "error" | "success";
   isSubmitting: boolean;
+  allowSelfSignup: boolean;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onSubmit: () => void;
+  onRegister: () => void;
+  onResetPassword: () => void;
 }
 
 export function AuthScreen({
   email,
   password,
   sessionState,
-  authError,
+  authMessage,
+  authMessageTone,
   isSubmitting,
+  allowSelfSignup,
   onEmailChange,
   onPasswordChange,
-  onSubmit
+  onSubmit,
+  onRegister,
+  onResetPassword
 }: AuthScreenProps) {
   const title =
     sessionState === "not-configured" ? "Configuracion pendiente" : "Bienvenida";
@@ -94,8 +102,6 @@ export function AuthScreen({
               />
             </label>
 
-            {authError ? <p className="auth-form__error">{authError}</p> : null}
-
             <button
               type="submit"
               className="primary-button auth-form__submit"
@@ -103,6 +109,46 @@ export function AuthScreen({
             >
               {isSubmitting ? "Validando acceso..." : "Ingresar al sistema"}
             </button>
+
+            <div className="auth-form__actions">
+              {allowSelfSignup ? (
+                <button
+                  type="button"
+                  className="outline-button auth-form__submit"
+                  disabled={sessionState === "not-configured" || isSubmitting}
+                  onClick={onRegister}
+                >
+                  Crear cuenta nueva
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                className="ghost-button auth-form__submit"
+                disabled={sessionState === "not-configured" || isSubmitting}
+                onClick={onResetPassword}
+              >
+                Olvide mi contrasena
+              </button>
+            </div>
+
+            {authMessage ? (
+              <p
+                className={
+                  authMessageTone === "success"
+                    ? "auth-form__message auth-form__message--success"
+                    : "auth-form__message auth-form__message--error"
+                }
+              >
+                {authMessage}
+              </p>
+            ) : null}
+
+            {allowSelfSignup ? (
+              <p className="auth-form__hint">
+                Cualquier persona con la URL podra crear una cuenta mientras este boton siga activo.
+              </p>
+            ) : null}
           </form>
         </section>
       </section>

@@ -473,7 +473,9 @@ function defaultMarketingExpenseValues(expense?: Expense) {
 }
 
 export default function App() {
-  const { sessionState, userEmail, authError, isSubmitting, login, logout } = useFirebaseSession();
+  const { sessionState, userEmail, authError, isSubmitting, login, register, resetPassword, logout } =
+    useFirebaseSession();
+  const allowSelfSignup = import.meta.env.VITE_ALLOW_SELF_SIGNUP !== "false";
   const { patients: sourcePatients, expenses: sourceExpenses } = useClinicData(
     sessionState === "authenticated"
   );
@@ -498,7 +500,7 @@ export default function App() {
   const [deleteIntent, setDeleteIntent] = useState<DeleteIntent>(null);
   const [loginEmail, setLoginEmail] = useState<string>(clinicProfile.loginEmail);
   const [loginPassword, setLoginPassword] = useState("");
-  const [manualAuthError, setManualAuthError] = useState<string | null>(null);
+  const [manualAuthFeedback, setManualAuthFeedback] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [syncState, setSyncState] = useState<SyncState>("idle");
   const [syncMessage, setSyncMessage] = useState("");
   const periodPickerRef = useRef<HTMLDivElement | null>(null);
@@ -553,7 +555,7 @@ export default function App() {
 
   useEffect(() => {
     if (sessionState === "authenticated") {
-      setManualAuthError(null);
+      setManualAuthFeedback(null);
       setLoginPassword("");
     }
   }, [sessionState]);
@@ -812,14 +814,59 @@ export default function App() {
     setDeleteIntent(null);
   };
 
+  const handleEmailChange = (value: string) => {
+    setLoginEmail(value);
+    setManualAuthFeedback(null);
+  };
+
+  const handlePasswordChange = (value: string) => {
+    setLoginPassword(value);
+    setManualAuthFeedback(null);
+  };
+
   const handleLoginSubmit = () => {
     if (!loginEmail.trim() || !loginPassword.trim()) {
-      setManualAuthError("Completa el email y la contrasena para ingresar.");
+      setManualAuthFeedback({ tone: "error", text: "Completa el email y la contrasena para ingresar." });
       return;
     }
 
-    setManualAuthError(null);
+    setManualAuthFeedback(null);
     void login(loginEmail.trim(), loginPassword);
+  };
+
+  const handleRegisterSubmit = () => {
+    if (!allowSelfSignup) return;
+
+    if (!loginEmail.trim() || !loginPassword.trim()) {
+      setManualAuthFeedback({ tone: "error", text: "Completa email y contrasena para crear la cuenta." });
+      return;
+    }
+
+    if (loginPassword.trim().length < 6) {
+      setManualAuthFeedback({ tone: "error", text: "La contrasena debe tener al menos 6 caracteres." });
+      return;
+    }
+
+    setManualAuthFeedback(null);
+    void register(loginEmail.trim(), loginPassword);
+  };
+
+  const handleResetPassword = () => {
+    if (!loginEmail.trim()) {
+      setManualAuthFeedback({ tone: "error", text: "Ingresa el email y luego presiona otra vez para recuperar la contrasena." });
+      return;
+    }
+
+    setManualAuthFeedback(null);
+    void (async () => {
+      const success = await resetPassword(loginEmail.trim());
+      if (success) {
+        setManualAuthFeedback({
+          tone: "success",
+          text: "Te enviamos un correo para cambiar la contrasena."
+        });
+      }
+    })();
   };
 
   const handleLogout = () => {
@@ -2069,7 +2116,8 @@ export default function App() {
     };
   }, [clinicExpenses, clinicPatients, deleteIntent]);
 
-  const authScreenError = manualAuthError ?? authError;
+  const authScreenMessage = manualAuthFeedback?.text ?? authError;
+  const authScreenMessageTone = manualAuthFeedback?.tone ?? "error";
 
   if (sessionState !== "authenticated") {
     return (
@@ -2077,11 +2125,15 @@ export default function App() {
         email={loginEmail}
         password={loginPassword}
         sessionState={sessionState}
-        authError={authScreenError}
+        authMessage={authScreenMessage}
+        authMessageTone={authScreenMessageTone}
         isSubmitting={isSubmitting}
-        onEmailChange={setLoginEmail}
-        onPasswordChange={setLoginPassword}
+        allowSelfSignup={allowSelfSignup}
+        onEmailChange={handleEmailChange}
+        onPasswordChange={handlePasswordChange}
         onSubmit={handleLoginSubmit}
+        onRegister={handleRegisterSubmit}
+        onResetPassword={handleResetPassword}
       />
     );
   }
