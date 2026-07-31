@@ -1504,6 +1504,7 @@ export default function App() {
             "Ortodoncia",
             "Alineadores",
             "Odontopediatria",
+            "Rehabilitacion",
             "Control",
             "Otro"
           ]
@@ -1562,6 +1563,7 @@ export default function App() {
             "Ortodoncia",
             "Alineadores",
             "Odontopediatria",
+            "Rehabilitacion",
             "Mantenimiento 6 meses",
             "Otro"
           ]

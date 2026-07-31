@@ -144,11 +144,6 @@ export function AuthScreen({
               </p>
             ) : null}
 
-            {allowSelfSignup ? (
-              <p className="auth-form__hint">
-                Cualquier persona con la URL podra crear una cuenta mientras este boton siga activo.
-              </p>
-            ) : null}
           </form>
         </section>
       </section>
