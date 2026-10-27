@@ -10,7 +10,7 @@ import {
 } from "firebase/auth";
 import { getDatabase, onValue, ref, remove, set } from "firebase/database";
 import { normalizeBudgetStatus, sortBudgetsByDateDesc, syncBudgetEntry } from "./budgets";
-import { normalizeParaguayPhone } from "./date";
+import { normalizeParaguayPhone, toIsoDate } from "./date";
 import { createLegacyPayments, sortFinancesByActivity, syncFinanceEntry } from "./financeEntries";
 import type { Expense, ExpenseScope, FinanceTone, Patient } from "../types/clinic";
 
@@ -74,16 +74,94 @@ function ensureDatabase() {
   return databaseInstance;
 }
 
-function normalizeCollection<T>(value: unknown): T[] {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean) as T[];
-  if (typeof value === "object") {
-    return Object.entries(value as Record<string, T>).map(([id, item]) => ({
-      id,
-      ...(item as object)
-    })) as T[];
+function getLocalTodayKey(): string {
+  return toIsoDate(new Date());
+}
+
+export function normalizeStoredAmount(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : 0;
   }
-  return [];
+
+  if (typeof value !== "string") return 0;
+
+  const rawValue = value.trim();
+  if (
+    !rawValue ||
+    rawValue.includes("-") ||
+    (rawValue.includes("(") && rawValue.includes(")"))
+  ) {
+    return 0;
+  }
+
+  const numericValue = rawValue.replace(/[^\d.,]/g, "");
+  if (!/\d/.test(numericValue)) return 0;
+
+  const dotMatches = numericValue.match(/\./g)?.length ?? 0;
+  const commaMatches = numericValue.match(/,/g)?.length ?? 0;
+  const lastDotIndex = numericValue.lastIndexOf(".");
+  const lastCommaIndex = numericValue.lastIndexOf(",");
+  const lastSeparatorIndex = Math.max(lastDotIndex, lastCommaIndex);
+  const digitsAfterLastSeparator =
+    lastSeparatorIndex >= 0 ? numericValue.length - lastSeparatorIndex - 1 : 0;
+  const hasBothSeparators = dotMatches > 0 && commaMatches > 0;
+  const hasSingleSeparator = dotMatches + commaMatches === 1;
+  const treatsLastSeparatorAsDecimal =
+    digitsAfterLastSeparator > 0 &&
+    digitsAfterLastSeparator <= 2 &&
+    (hasBothSeparators || hasSingleSeparator);
+
+  const normalizedValue = treatsLastSeparatorAsDecimal
+    ? `${numericValue.slice(0, lastSeparatorIndex).replace(/[^\d]/g, "")}.${numericValue
+        .slice(lastSeparatorIndex + 1)
+        .replace(/[^\d]/g, "")}`
+    : numericValue.replace(/[^\d]/g, "");
+  const amount = Number(normalizedValue);
+
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function reserveUniqueId(candidate: unknown, fallbackId: string, usedIds: Set<string>): string {
+  const candidateId = String(candidate ?? "").trim();
+  const baseId = candidateId || fallbackId;
+  let nextId = baseId;
+  let duplicateIndex = 2;
+
+  while (usedIds.has(nextId)) {
+    nextId = `${baseId}-${duplicateIndex}`;
+    duplicateIndex += 1;
+  }
+
+  usedIds.add(nextId);
+  return nextId;
+}
+
+export function normalizeFirebaseCollection<T>(value: unknown, fallbackPrefix = "item"): T[] {
+  if (!value || typeof value !== "object") return [];
+
+  const isArray = Array.isArray(value);
+  const entries = isArray
+    ? value.map((item, index) => [String(index), item] as const)
+    : Object.entries(value as Record<string, unknown>);
+  const validEntries = entries.filter(
+    (entry): entry is readonly [string, Record<string, unknown>] =>
+      Boolean(entry[1]) && typeof entry[1] === "object" && !Array.isArray(entry[1])
+  );
+  const isArrayLikeObject =
+    !isArray && validEntries.length > 0 && validEntries.every(([firebaseKey]) => /^\d+$/.test(firebaseKey));
+  const preserveEmbeddedIds = isArray || isArrayLikeObject;
+  const usedIds = new Set<string>();
+
+  return validEntries.map(([firebaseKey, item], index) => {
+    const fallbackId = `${fallbackPrefix}-${index + 1}`;
+    const preferredId = preserveEmbeddedIds ? item.id : firebaseKey;
+    const id = reserveUniqueId(preferredId, fallbackId, usedIds);
+
+    return {
+      ...item,
+      id
+    } as T;
+  });
 }
 
 function inferFinanceTone(rawTone: string | undefined, pendingTotal: number): FinanceTone {
@@ -97,7 +175,8 @@ function inferFinanceTone(rawTone: string | undefined, pendingTotal: number): Fi
 function normalizeExpense(
   rawId: string,
   rawExpense: Record<string, unknown>,
-  fallbackScope: ExpenseScope = "general"
+  fallbackScope: ExpenseScope = "general",
+  fallbackDate = getLocalTodayKey()
 ): Expense {
   const scope =
     rawExpense.scope === "patient" || rawExpense.scope === "general"
@@ -106,10 +185,10 @@ function normalizeExpense(
 
   return {
     id: rawId,
-    date: String(rawExpense.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+    date: String(rawExpense.date || fallbackDate).slice(0, 10),
     concept: String(rawExpense.concept || "Sin concepto"),
     category: String(rawExpense.category || "General"),
-    amount: Number(rawExpense.amount || 0),
+    amount: normalizeStoredAmount(rawExpense.amount),
     description: String(rawExpense.description || ""),
     scope,
     patientId: rawExpense.patientId ? String(rawExpense.patientId) : undefined,
@@ -126,61 +205,75 @@ function normalizeExpense(
 }
 
 function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): Patient {
-  const rawFinances = normalizeCollection<Record<string, unknown>>(rawPatient.finances);
+  const fallbackDate = getLocalTodayKey();
+  const rawFinances = normalizeFirebaseCollection<Record<string, unknown>>(rawPatient.finances, "finance");
   const finances = rawFinances.map((entry, index) => {
     const id = String(entry.id || `finance-${index + 1}`);
-    const payments = normalizeCollection<Record<string, unknown>>(entry.payments).map((payment, paymentIndex) => ({
-      id: String(payment.id || `${id}-payment-${paymentIndex + 1}`),
-      date: String(payment.date || entry.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
-      amount: Number(payment.amount || 0),
-      method: String(payment.method || "Otro"),
-      note: String(payment.note || ""),
-      fromMarketing: Boolean(payment.fromMarketing)
-    }));
+    const normalizedPayments = normalizeFirebaseCollection<Record<string, unknown>>(
+      entry.payments,
+      `${id}-payment`
+    )
+      .map((payment, paymentIndex) => ({
+        id: String(payment.id || `${id}-payment-${paymentIndex + 1}`),
+        date: String(payment.date || entry.date || fallbackDate).slice(0, 10),
+        amount: normalizeStoredAmount(payment.amount),
+        method: String(payment.method || "Otro"),
+        note: String(payment.note || ""),
+        fromMarketing: Boolean(payment.fromMarketing)
+      }))
+      .filter((payment) => payment.amount > 0);
+    const legacyPaidAmount = normalizeStoredAmount(entry.paidAmount);
+    const payments =
+      normalizedPayments.length > 0
+        ? normalizedPayments
+        : createLegacyPayments({
+            id,
+            date: String(entry.date || fallbackDate).slice(0, 10),
+            paidAmount: legacyPaidAmount,
+            description: String(entry.description || "")
+          });
 
     return syncFinanceEntry({
       id,
-      date: String(entry.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+      date: String(entry.date || fallbackDate).slice(0, 10),
       concept: String(entry.concept || "Sin concepto"),
       practitioner: entry.practitioner ? String(entry.practitioner) : undefined,
       status: String(entry.status || ""),
-      totalAmount: Number(entry.totalAmount || 0),
-      paidAmount: Number(entry.paidAmount || 0),
-      pendingAmount: Number(entry.pendingAmount || 0),
+      totalAmount: normalizeStoredAmount(entry.totalAmount),
+      paidAmount: legacyPaidAmount,
+      pendingAmount: normalizeStoredAmount(entry.pendingAmount),
       description: String(entry.description || ""),
       linkedTreatmentId: entry.linkedTreatmentId ? String(entry.linkedTreatmentId) : undefined,
-      payments: payments.length > 0 ? payments : createLegacyPayments({
-        id,
-        date: String(entry.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
-        paidAmount: Number(entry.paidAmount || 0),
-        description: String(entry.description || "")
-      })
+      payments
     });
   });
   const orderedFinances = sortFinancesByActivity(finances);
   const pendingTotal = orderedFinances.reduce((sum, entry) => sum + Number(entry.pendingAmount || 0), 0);
   const patientExpensesSource = rawPatient.patientExpenses || rawPatient.expenses;
-  const patientExpenses = normalizeCollection<Record<string, unknown>>(patientExpensesSource).map((expense, index) =>
-    normalizeExpense(String(expense.id || `patient-expense-${index + 1}`), expense, "patient")
+  const patientExpenses = normalizeFirebaseCollection<Record<string, unknown>>(
+    patientExpensesSource,
+    "patient-expense"
+  ).map((expense, index) =>
+    normalizeExpense(String(expense.id || `patient-expense-${index + 1}`), expense, "patient", fallbackDate)
   );
   const budgets = sortBudgetsByDateDesc(
-    normalizeCollection<Record<string, unknown>>(rawPatient.budgets).map((budget, index) =>
+    normalizeFirebaseCollection<Record<string, unknown>>(rawPatient.budgets, "budget").map((budget, index) =>
       syncBudgetEntry({
         id: String(budget.id || `budget-${index + 1}`),
         budgetNumber: String(budget.budgetNumber || ""),
         status: normalizeBudgetStatus(String(budget.status || "Pendiente")),
-        createdAt: String(budget.createdAt || new Date().toISOString().slice(0, 10)).slice(0, 10),
+        createdAt: String(budget.createdAt || fallbackDate).slice(0, 10),
         validityDays: Number(budget.validityDays || 15) === 30 ? 30 : 15,
         validUntil: String(budget.validUntil || ""),
         note: String(budget.note || ""),
-        items: normalizeCollection<Record<string, unknown>>(budget.items).map((item, itemIndex) => ({
+        items: normalizeFirebaseCollection<Record<string, unknown>>(budget.items, "budget-item").map((item, itemIndex) => ({
           id: String(item.id || `budget-item-${itemIndex + 1}`),
           quantity: Number(item.quantity || 0),
           detail: String(item.detail || ""),
-          unitPrice: Number(item.unitPrice || 0),
-          totalPrice: Number(item.totalPrice || 0)
+          unitPrice: normalizeStoredAmount(item.unitPrice),
+          totalPrice: normalizeStoredAmount(item.totalPrice)
         })),
-        totalAmount: Number(budget.totalAmount || 0)
+        totalAmount: normalizeStoredAmount(budget.totalAmount)
       })
     )
   );
@@ -190,7 +283,7 @@ function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): P
     fullName: String(rawPatient.fullName || rawPatient.name || "Paciente sin nombre"),
     phone: normalizeParaguayPhone(String(rawPatient.phone || "")),
     cedula: String(rawPatient.cedula || rawPatient.identityNumber || rawPatient.idNumber || ""),
-    createdAt: String(rawPatient.createdAt || new Date().toISOString().slice(0, 10)).slice(0, 10),
+    createdAt: String(rawPatient.createdAt || fallbackDate).slice(0, 10),
     birthDate: String(rawPatient.birthDate || ""),
     lastVisit: rawPatient.lastVisit ? String(rawPatient.lastVisit).slice(0, 10) : null,
     financeTone: inferFinanceTone(String(rawPatient.financeTone || rawPatient.financeStatus || ""), pendingTotal),
@@ -198,17 +291,17 @@ function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): P
     city: String(rawPatient.city || ""),
     tags: Array.isArray(rawPatient.tags) ? rawPatient.tags.map(String) : [],
     clinicalSummary: String(rawPatient.clinicalSummary || ""),
-    treatments: normalizeCollection<Patient["treatments"][number]>(rawPatient.treatments).map((treatment) => ({
+    treatments: normalizeFirebaseCollection<Patient["treatments"][number]>(rawPatient.treatments, "treatment").map((treatment) => ({
       ...treatment,
       practitioner: String(treatment.practitioner || ""),
-      totalAmount: Number(treatment.totalAmount || 0),
-      paidAmount: Number(treatment.paidAmount || 0),
-      pendingAmount: Number(treatment.pendingAmount || 0),
+      totalAmount: normalizeStoredAmount(treatment.totalAmount),
+      paidAmount: normalizeStoredAmount(treatment.paidAmount),
+      pendingAmount: normalizeStoredAmount(treatment.pendingAmount),
       linkedFinanceId: treatment.linkedFinanceId ? String(treatment.linkedFinanceId) : undefined
     })),
-    evolutions: normalizeCollection<Patient["evolutions"][number]>(rawPatient.evolutions),
-    followUps: normalizeCollection<Patient["followUps"][number]>(rawPatient.followUps),
-    notes: normalizeCollection<Patient["notes"][number]>(rawPatient.notes),
+    evolutions: normalizeFirebaseCollection<Patient["evolutions"][number]>(rawPatient.evolutions, "evolution"),
+    followUps: normalizeFirebaseCollection<Patient["followUps"][number]>(rawPatient.followUps, "followup"),
+    notes: normalizeFirebaseCollection<Patient["notes"][number]>(rawPatient.notes, "note"),
     budgets,
     finances: orderedFinances,
     patientExpenses

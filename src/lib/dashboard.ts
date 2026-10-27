@@ -162,6 +162,7 @@ export function getPendingCollections(patients: Patient[], selectedPeriod: Month
         .map((entry) => ({
           patientId: patient.id,
           patientName: patient.fullName,
+          financeId: entry.id,
           concept: entry.concept,
           date: entry.date,
           pendingAmount: entry.pendingAmount
@@ -179,6 +180,8 @@ export function getCollectedIncomeEntries(patients: Patient[], selectedPeriod: M
           .map((payment) => ({
             patientId: patient.id,
             patientName: patient.fullName,
+            financeId: entry.id,
+            paymentId: payment.id,
             concept: entry.concept,
             date: payment.date,
             paidAmount: payment.amount,

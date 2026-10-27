@@ -799,11 +799,31 @@ a {
 
 .finance-payment-row {
   display: grid;
-  gap: 3px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.finance-payment-row__content {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.finance-payment-row__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.finance-payment-row__actions button {
+  padding: 7px 10px;
+  font-size: 0.78rem;
 }
 
 .finance-payment-row strong {
@@ -2461,6 +2481,14 @@ a {
   .profile-chip,
   .mini-metric {
     width: 100%;
+  }
+
+  .finance-payment-row {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-payment-row__actions {
+    justify-content: flex-start;
   }
 
   .modal-card {

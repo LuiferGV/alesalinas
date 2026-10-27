@@ -33,6 +33,10 @@ export function toIsoDate(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+export function getTodayIsoDate(referenceDate = new Date()): string {
+  return toIsoDate(referenceDate);
+}
+
 export function addDays(baseDate: Date, amount: number): string {
   const next = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
   next.setDate(next.getDate() + amount);

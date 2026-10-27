@@ -1,4 +1,4 @@
-import { addDays, formatDate } from "./date";
+import { addDays, formatDate, getTodayIsoDate } from "./date";
 import type { BudgetEntry, BudgetItem, BudgetStatus } from "../types/clinic";
 
 function parseIsoDate(value: string): Date {
@@ -44,14 +44,14 @@ export function normalizeBudgetStatus(value?: string): BudgetStatus {
 }
 
 export function isBudgetValid(entry: BudgetEntry): boolean {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayIsoDate();
   return entry.validUntil >= today;
 }
 
 export function syncBudgetEntry(entry: BudgetEntry): BudgetEntry {
   const normalizedItems = entry.items.map((item) => syncBudgetItem(item)).filter((item) => item.detail.trim());
   const validityDays = entry.validityDays === 30 ? 30 : 15;
-  const createdAt = entry.createdAt || new Date().toISOString().slice(0, 10);
+  const createdAt = entry.createdAt || getTodayIsoDate();
 
   return {
     ...entry,

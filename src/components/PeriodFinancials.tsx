@@ -8,6 +8,7 @@ export type FinancePanel = "income" | "pending" | "expenses" | "net";
 interface PendingCollectionItem {
   patientId: string;
   patientName: string;
+  financeId: string;
   concept: string;
   date: string;
   pendingAmount: number;
@@ -16,6 +17,8 @@ interface PendingCollectionItem {
 interface CollectedItem {
   patientId: string;
   patientName: string;
+  financeId: string;
+  paymentId: string;
   concept: string;
   date: string;
   paidAmount: number;
@@ -62,7 +65,7 @@ export function PeriodFinancials({
           <div className="stack-list compact-list">
             {pendingCollections.length > 0 ? (
               pendingCollections.map((item) => (
-                <article key={`${item.patientId}-${item.concept}-${item.date}`} className="list-card list-card--compact">
+                <article key={`${item.patientId}-${item.financeId}`} className="list-card list-card--compact">
                   <div className="list-card__content">
                     <h4>{item.patientName}</h4>
                     <p className="list-card__subtitle">
@@ -95,7 +98,7 @@ export function PeriodFinancials({
           <div className="stack-list compact-list">
             {collectedEntries.length > 0 ? (
               collectedEntries.map((item) => (
-                <article key={`${item.patientId}-${item.concept}-${item.date}`} className="list-card list-card--compact">
+                <article key={`${item.patientId}-${item.financeId}-${item.paymentId}`} className="list-card list-card--compact">
                   <div className="list-card__content">
                     <h4>{item.patientName}</h4>
                     <p className="list-card__subtitle">
@@ -129,7 +132,10 @@ export function PeriodFinancials({
           <div className="stack-list compact-list">
             {expenses.length > 0 ? (
               expenses.map((expense) => (
-                <article key={expense.id} className="list-card list-card--compact">
+                <article
+                  key={`${expense.scope ?? "general"}-${expense.patientId ?? "general"}-${expense.id}`}
+                  className="list-card list-card--compact"
+                >
                   <div className="list-card__content">
                     <h4>{expense.concept}</h4>
                     <p className="list-card__subtitle">

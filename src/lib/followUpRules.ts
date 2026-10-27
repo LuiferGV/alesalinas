@@ -1,4 +1,4 @@
-import { addMonths, formatDate, addDays } from "./date";
+import { addMonths, formatDate, addDays, getTodayIsoDate } from "./date";
 
 type FollowUpOffset = {
   months?: number;
@@ -59,7 +59,7 @@ function normalizeText(value: string): string {
 }
 
 function buildDueDate(eventDate: string, offset: FollowUpOffset): string {
-  const safeDate = eventDate || new Date().toISOString().slice(0, 10);
+  const safeDate = eventDate || getTodayIsoDate();
   const baseDate = parseIsoDate(safeDate);
 
   if (offset.months) {

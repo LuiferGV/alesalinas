@@ -67,7 +67,7 @@ export function syncFinanceEntry(entry: FinanceEntry): FinanceEntry {
   }));
 
   const totalAmount = Math.max(Number(entry.totalAmount || 0), 0);
-  const paidAmount = Math.min(getPaymentsTotal(payments), totalAmount);
+  const paidAmount = getPaymentsTotal(payments);
   const pendingAmount = Math.max(totalAmount - paidAmount, 0);
 
   return {
@@ -104,4 +104,38 @@ export function appendPaymentToFinance(entry: FinanceEntry, payment: PaymentEntr
     ...entry,
     payments: [payment, ...(entry.payments ?? [])]
   });
+}
+
+export function replacePaymentInFinance(entry: FinanceEntry, payment: PaymentEntry) {
+  return syncFinanceEntry({
+    ...entry,
+    payments: entry.payments.map((current) => (current.id === payment.id ? payment : current))
+  });
+}
+
+export function removePaymentFromFinance(entry: FinanceEntry, paymentId: string) {
+  return syncFinanceEntry({
+    ...entry,
+    payments: entry.payments.filter((payment) => payment.id !== paymentId)
+  });
+}
+
+export function replacePaymentInFinances(
+  entries: FinanceEntry[],
+  financeId: string,
+  payment: PaymentEntry
+) {
+  return entries.map((entry) =>
+    entry.id === financeId ? replacePaymentInFinance(entry, payment) : entry
+  );
+}
+
+export function removePaymentFromFinances(
+  entries: FinanceEntry[],
+  financeId: string,
+  paymentId: string
+) {
+  return entries.map((entry) =>
+    entry.id === financeId ? removePaymentFromFinance(entry, paymentId) : entry
+  );
 }

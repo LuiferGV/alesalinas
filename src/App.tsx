@@ -33,6 +33,9 @@ import {
   createFinanceEntry,
   createPaymentEntry,
   describeFinanceStatus,
+  getPaymentsTotal,
+  removePaymentFromFinances,
+  replacePaymentInFinances,
   sortFinancesByActivity,
   syncFinanceEntry
 } from "./lib/financeEntries";
@@ -44,10 +47,12 @@ import {
   getPeriodExpenses
 } from "./lib/dashboard";
 import {
+  formatDate,
   formatGs,
   formatMonthRangeLabel,
   getParaguayPhoneSearchTerms,
   getMonthKey,
+  getTodayIsoDate,
   normalizeMonthRange,
   normalizeParaguayPhone
 } from "./lib/date";
@@ -88,14 +93,14 @@ type ModalState =
   | { type: "marketing-expense-create" }
   | { type: "marketing-expense-edit"; expenseId: string }
   | { type: "record-create"; kind: RecordKind; patientId?: string; prefillFromId?: string }
-  | { type: "record-edit"; kind: RecordKind; patientId: string; itemId: string }
+  | { type: "record-edit"; kind: RecordKind; patientId: string; itemId: string; parentId?: string }
   | { type: "budget-preview"; patientId: string; budgetId: string }
   | null;
 
 type DeleteIntent =
   | { target: "patient"; patientId: string }
   | { target: "marketing-expense"; expenseId: string }
-  | { target: RecordKind; patientId: string; itemId: string }
+  | { target: RecordKind; patientId: string; itemId: string; parentId?: string }
   | null;
 
 function getPatientInitial(patientName: string) {
@@ -137,7 +142,7 @@ function filterPatients(
 }
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return getTodayIsoDate();
 }
 
 function currentMonthKey(referenceDate = new Date()) {
@@ -793,12 +798,12 @@ export default function App() {
     setModalState({ type: "record-create", kind, patientId });
   };
 
-  const openEditRecord = (kind: RecordKind, patientId: string, itemId: string) => {
-    setModalState({ type: "record-edit", kind, patientId, itemId });
+  const openEditRecord = (kind: RecordKind, patientId: string, itemId: string, parentId?: string) => {
+    setModalState({ type: "record-edit", kind, patientId, itemId, parentId });
   };
 
-  const askDeleteRecord = (kind: RecordKind, patientId: string, itemId: string) => {
-    setDeleteIntent({ target: kind, patientId, itemId });
+  const askDeleteRecord = (kind: RecordKind, patientId: string, itemId: string, parentId?: string) => {
+    setDeleteIntent({ target: kind, patientId, itemId, parentId });
   };
 
   const askDeletePatient = (patientId: string) => {
@@ -1068,7 +1073,8 @@ export default function App() {
     kind: RecordKind,
     values: Record<string, string>,
     modalPatientId?: string,
-    itemId?: string
+    itemId?: string,
+    parentId?: string
   ) => {
     const targetPatientId = modalPatientId ?? values.patientTarget;
     if (!targetPatientId) return;
@@ -1086,6 +1092,15 @@ export default function App() {
       const treatmentId = itemId ?? createId("treatment");
       const totalAmount = toAmount(values.totalAmount);
       const practitioner = normalizePractitionerName(values.practitioner);
+      const recordedPaymentsTotal = existingFinance ? getPaymentsTotal(existingFinance.payments) : 0;
+
+      if (existingFinance && totalAmount < recordedPaymentsTotal) {
+        window.alert(
+          `El monto del tratamiento no puede ser menor a los pagos ya registrados (${formatGs(recordedPaymentsTotal)}). Corrige primero los pagos.`
+        );
+        return;
+      }
+
       const linkedFinance = buildTreatmentFinanceEntry(treatmentId, values, existingFinance ?? undefined);
 
       const nextItem: Treatment = {
@@ -1189,6 +1204,15 @@ export default function App() {
       const totalAmount = toAmount(values.totalAmount);
       const practitioner = normalizePractitionerName(values.practitioner);
       const initialPaymentAmount = itemId ? 0 : Math.min(toAmount(values.initialPaymentAmount), totalAmount);
+      const recordedPaymentsTotal = existingFinance ? getPaymentsTotal(existingFinance.payments) : 0;
+
+      if (existingFinance && totalAmount < recordedPaymentsTotal) {
+        window.alert(
+          `El monto del cargo no puede ser menor a los pagos ya registrados (${formatGs(recordedPaymentsTotal)}). Corrige primero los pagos.`
+        );
+        return;
+      }
+
       const nextItem = syncFinanceEntry({
         id: itemId ?? createId("finance"),
         date: values.date || todayKey(),
@@ -1237,7 +1261,15 @@ export default function App() {
     }
 
     if (kind === "payment") {
-      const financeTargetId = values.financeTarget;
+      const existingFinanceTarget = itemId
+        ? currentPatient?.finances.find(
+            (entry) => entry.id === parentId && entry.payments.some((payment) => payment.id === itemId)
+          ) ?? null
+        : null;
+      const existingPayment = itemId
+        ? existingFinanceTarget?.payments.find((payment) => payment.id === itemId) ?? null
+        : null;
+      const financeTargetId = existingFinanceTarget?.id ?? values.financeTarget;
       const amount = toAmount(values.amount);
       const method = values.method.trim() || "Efectivo";
       const note = values.note.trim();
@@ -1253,13 +1285,19 @@ export default function App() {
         return;
       }
 
-      if (amount > financeTarget.pendingAmount) {
+      if (itemId && !existingPayment) {
+        window.alert("No encontramos el pago que queres actualizar.");
+        return;
+      }
+
+      const maximumAmount = financeTarget.pendingAmount + (existingPayment?.amount ?? 0);
+      if (amount > maximumAmount) {
         window.alert("El pago no puede ser mayor al saldo pendiente.");
         return;
       }
 
       const paymentEntry: PaymentEntry = createPaymentEntry({
-        id: createId("payment"),
+        id: itemId ?? createId("payment"),
         date: values.date || todayKey(),
         amount,
         method,
@@ -1271,9 +1309,11 @@ export default function App() {
         targetPatientId,
         (patient) => {
           const nextFinances = sortFinancesByActivity(
-            patient.finances.map((entry) =>
-              entry.id === financeTargetId ? appendPaymentToFinance(entry, paymentEntry) : entry
-            )
+            itemId
+              ? replacePaymentInFinances(patient.finances, financeTargetId, paymentEntry)
+              : patient.finances.map((entry) =>
+                  entry.id === financeTargetId ? appendPaymentToFinance(entry, paymentEntry) : entry
+                )
           );
 
           return {
@@ -1282,7 +1322,7 @@ export default function App() {
             treatments: syncTreatmentsFromFinances(patient.treatments, nextFinances)
           };
         },
-        "Pago registrado."
+        itemId ? "Pago actualizado." : "Pago registrado."
       );
     }
 
@@ -1379,7 +1419,7 @@ export default function App() {
       return;
     }
 
-    const { target, patientId, itemId } = deleteIntent;
+    const { target, patientId, itemId, parentId } = deleteIntent;
 
     if (target === "treatment") {
       applyPatientMutation(
@@ -1445,6 +1485,24 @@ export default function App() {
       );
     }
 
+    if (target === "payment") {
+      applyPatientMutation(
+        patientId,
+        (patient) => {
+          const nextFinances = sortFinancesByActivity(
+            removePaymentFromFinances(patient.finances, parentId ?? "", itemId)
+          );
+
+          return {
+            ...patient,
+            finances: nextFinances,
+            treatments: syncTreatmentsFromFinances(patient.treatments, nextFinances)
+          };
+        },
+        "Pago eliminado."
+      );
+    }
+
     if (target === "expense") {
       applyPatientMutation(
         patientId,
@@ -1470,7 +1528,12 @@ export default function App() {
     closeModals();
   };
 
-  const getRecordFields = (kind: RecordKind, patientId?: string, itemId?: string): ModalField[] => {
+  const getRecordFields = (
+    kind: RecordKind,
+    patientId?: string,
+    itemId?: string,
+    parentId?: string
+  ): ModalField[] => {
     const patient = patientId ? clinicPatients.find((entry) => entry.id === patientId) ?? null : null;
     const needsPatientField = (kind === "treatment" || kind === "expense") && !patientId;
     const patientField: ModalField[] = needsPatientField
@@ -1602,6 +1665,16 @@ export default function App() {
     }
 
     if (kind === "payment") {
+      const existingPaymentMethod = itemId
+        ? patient?.finances
+            .find((entry) => entry.id === parentId)
+            ?.payments.find((payment) => payment.id === itemId)?.method
+        : undefined;
+      const defaultPaymentMethods = ["Efectivo", "Transferencia", "Tarjeta", "QR", "Otro"];
+      const paymentMethods =
+        existingPaymentMethod && !defaultPaymentMethods.includes(existingPaymentMethod)
+          ? [...defaultPaymentMethods, existingPaymentMethod]
+          : defaultPaymentMethods;
       const pendingFinanceOptions =
         patient?.finances
           .filter((entry) => entry.pendingAmount > 0)
@@ -1612,20 +1685,24 @@ export default function App() {
 
       return [
         { name: "date", label: "Fecha del pago", type: "date", required: true },
-        {
-          name: "financeTarget",
-          label: "Deuda o tratamiento",
-          type: "search-select",
-          placeholder: "Buscar saldo pendiente",
-          required: true,
-          options: pendingFinanceOptions
-        },
+        ...(itemId
+          ? []
+          : [
+              {
+                name: "financeTarget",
+                label: "Deuda o tratamiento",
+                type: "search-select",
+                placeholder: "Buscar saldo pendiente",
+                required: true,
+                options: pendingFinanceOptions
+              } as ModalField
+            ]),
         { name: "amount", label: "Monto abonado", type: "number", min: 0, step: "1", required: true },
         {
           name: "method",
           label: "Forma de pago",
           type: "select",
-          options: ["Efectivo", "Transferencia", "Tarjeta", "QR", "Otro"]
+          options: paymentMethods
         },
         { name: "fromMarketing", label: "Este pago vino de marketing", type: "checkbox" },
         { name: "note", label: "Observacion", type: "textarea", rows: 4 }
@@ -1654,7 +1731,12 @@ export default function App() {
     ];
   };
 
-  const getRecordInitialValues = (kind: RecordKind, patientId?: string, itemId?: string): Record<string, string> => {
+  const getRecordInitialValues = (
+    kind: RecordKind,
+    patientId?: string,
+    itemId?: string,
+    parentId?: string
+  ): Record<string, string> => {
     const patient = patientId ? clinicPatients.find((entry) => entry.id === patientId) ?? null : null;
     const defaultPatientTarget = patientId && patient ? patient.id : "";
 
@@ -1734,14 +1816,22 @@ export default function App() {
     }
 
     if (kind === "payment") {
+      const financeWithPayment = itemId
+        ? patient?.finances.find(
+            (entry) => entry.id === parentId && entry.payments.some((payment) => payment.id === itemId)
+          ) ?? null
+        : null;
+      const item = itemId
+        ? financeWithPayment?.payments.find((payment) => payment.id === itemId) ?? null
+        : null;
       const pendingFinance = patient?.finances.find((entry) => entry.pendingAmount > 0) ?? null;
       return {
-        date: todayKey(),
-        financeTarget: pendingFinance?.id ?? "",
-        amount: "",
-        method: "Efectivo",
-        fromMarketing: "false",
-        note: ""
+        date: item?.date ?? todayKey(),
+        financeTarget: financeWithPayment?.id ?? pendingFinance?.id ?? "",
+        amount: item ? String(item.amount) : "",
+        method: item?.method ?? "Efectivo",
+        fromMarketing: item?.fromMarketing ? "true" : "false",
+        note: item?.note ?? ""
       };
     }
 
@@ -2034,20 +2124,26 @@ export default function App() {
       );
     }
 
+    const editingPaymentFinance =
+      modalState.kind === "payment" && modalState.type === "record-edit" && patient
+        ? patient.finances.find((entry) => entry.id === modalState.parentId) ?? null
+        : null;
+    const entitySubtitle = editingPaymentFinance
+      ? `Paciente: ${patientLabel} | Deuda: ${editingPaymentFinance.concept}. Corrige el monto, la fecha o la forma de pago.`
+      : modalState.patientId
+        ? `Paciente: ${patientLabel}`
+        : modalState.kind === "treatment"
+          ? "Elige paciente, doctor y cobro en una sola carga."
+          : modalState.kind === "payment"
+            ? "Registra un abono nuevo sin tocar el historial anterior."
+            : modalState.kind === "expense"
+              ? "Elige paciente y carga el costo real del caso."
+              : "Elige paciente y completa los datos.";
+
     return (
       <EntityModal
         title={modalState.type === "record-create" ? createKindTitles[modalState.kind] : editKindTitles[modalState.kind]}
-        subtitle={
-          modalState.patientId
-            ? `Paciente: ${patientLabel}`
-            : modalState.kind === "treatment"
-              ? "Elige paciente, doctor y cobro en una sola carga."
-              : modalState.kind === "payment"
-                ? "Registra un abono nuevo sin tocar el historial anterior."
-              : modalState.kind === "expense"
-                ? "Elige paciente y carga el costo real del caso."
-              : "Elige paciente y completa los datos."
-        }
+        subtitle={entitySubtitle}
         submitLabel={
           modalState.kind === "payment"
             ? "Guardar pago"
@@ -2058,12 +2154,14 @@ export default function App() {
         fields={getRecordFields(
           modalState.kind,
           modalState.patientId,
-          modalState.type === "record-edit" ? modalState.itemId : undefined
+          modalState.type === "record-edit" ? modalState.itemId : undefined,
+          modalState.type === "record-edit" ? modalState.parentId : undefined
         )}
         initialValues={getRecordInitialValues(
           modalState.kind,
           modalState.patientId,
-          modalState.type === "record-edit" ? modalState.itemId : undefined
+          modalState.type === "record-edit" ? modalState.itemId : undefined,
+          modalState.type === "record-edit" ? modalState.parentId : undefined
         )}
         transformValues={modalState.kind === "followup" ? transformFollowUpValues : undefined}
         onClose={closeModals}
@@ -2072,7 +2170,8 @@ export default function App() {
             modalState.kind,
             values,
             modalState.patientId,
-            modalState.type === "record-edit" ? modalState.itemId : undefined
+            modalState.type === "record-edit" ? modalState.itemId : undefined,
+            modalState.type === "record-edit" ? modalState.parentId : undefined
           )
         }
       />
@@ -2097,6 +2196,24 @@ export default function App() {
         title: "Eliminar gasto de marketing",
         message: `Esta accion eliminara ${expense?.concept ?? "este gasto"} del panel de marketing.`,
         confirmLabel: "Eliminar gasto"
+      };
+    }
+
+    if (deleteIntent.target === "payment") {
+      const patient = clinicPatients.find((entry) => entry.id === deleteIntent.patientId) ?? null;
+      const finance = patient?.finances.find((entry) => entry.id === deleteIntent.parentId) ?? null;
+      const payment = finance?.payments.find((entry) => entry.id === deleteIntent.itemId) ?? null;
+      const pendingAfterDelete = finance && payment
+        ? Math.max(finance.totalAmount - Math.max(finance.paidAmount - payment.amount, 0), 0)
+        : 0;
+      const reopenedAmount = finance ? Math.max(pendingAfterDelete - finance.pendingAmount, 0) : 0;
+
+      return {
+        title: "Eliminar pago",
+        message: payment && finance
+          ? `Se eliminara el pago de ${formatGs(payment.amount)} del ${formatDate(payment.date)} para ${finance.concept} de ${patient?.fullName ?? "este paciente"}. El cobrado del periodo se actualizara${reopenedAmount > 0 ? ` y se reabrira un saldo de ${formatGs(reopenedAmount)}` : ""}.`
+          : "Esta accion eliminara el pago seleccionado y actualizara el cobrado del periodo.",
+        confirmLabel: "Eliminar pago"
       };
     }
 

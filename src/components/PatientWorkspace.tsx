@@ -30,8 +30,8 @@ interface PatientWorkspaceProps {
   onEditPatient: (patientId: string) => void;
   onDeletePatient: (patientId: string) => void;
   onCreateRecord: (kind: RecordKind, patientId: string) => void;
-  onEditRecord: (kind: RecordKind, patientId: string, itemId: string) => void;
-  onDeleteRecord: (kind: RecordKind, patientId: string, itemId: string) => void;
+  onEditRecord: (kind: RecordKind, patientId: string, itemId: string, parentId?: string) => void;
+  onDeleteRecord: (kind: RecordKind, patientId: string, itemId: string, parentId?: string) => void;
   onPreviewBudget: (patientId: string, budgetId: string) => void;
   onDuplicateBudget: (patientId: string, budgetId: string) => void;
 }
@@ -615,12 +615,30 @@ export function PatientWorkspace({
                           {entry.payments.length > 0 ? (
                             entry.payments.map((payment) => (
                               <div key={payment.id} className="finance-payment-row">
-                                <strong>{formatGs(payment.amount)}</strong>
-                                <span>
-                                  {formatDate(payment.date)}
-                                  {payment.method ? ` | ${payment.method}` : ""}
-                                  {payment.note ? ` | ${payment.note}` : ""}
-                                </span>
+                                <div className="finance-payment-row__content">
+                                  <strong>{formatGs(payment.amount)}</strong>
+                                  <span>
+                                    {formatDate(payment.date)}
+                                    {payment.method ? ` | ${payment.method}` : ""}
+                                    {payment.note ? ` | ${payment.note}` : ""}
+                                  </span>
+                                </div>
+                                <div className="finance-payment-row__actions">
+                                  <button
+                                    type="button"
+                                    className="ghost-button"
+                                    onClick={() => onEditRecord("payment", patient.id, payment.id, entry.id)}
+                                  >
+                                    Editar pago
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="danger-button danger-button--ghost"
+                                    onClick={() => onDeleteRecord("payment", patient.id, payment.id, entry.id)}
+                                  >
+                                    Eliminar pago
+                                  </button>
+                                </div>
                               </div>
                             ))
                           ) : (
