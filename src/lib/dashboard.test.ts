@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getCollectedIncomeEntries,
   getDashboardMetrics,
+  getPendingCollections,
   getPeriodExpenses
 } from "./dashboard";
 import type {
@@ -342,5 +343,138 @@ describe("dashboard financial totals", () => {
       expensesAmount: 120_000,
       netAmount: 60_000
     });
+  });
+
+  it("usa el agregado historico solo cuando no existen pagos detallados", () => {
+    const patient = makePatient({
+      id: "legacy-patient",
+      finances: [
+        {
+          ...makeFinance({
+            id: "legacy-finance",
+            date: "5/9/2026",
+            totalAmount: 500_000,
+            payments: []
+          }),
+          paidAmount: 300_000,
+          pendingAmount: 500_000
+        },
+        {
+          ...makeFinance({
+            id: "partially-migrated-finance",
+            date: "2026-09-06",
+            totalAmount: 400_000,
+            payments: [makePayment("explicit-payment", "", 100_000)]
+          }),
+          paidAmount: 250_000,
+          pendingAmount: 400_000
+        }
+      ]
+    });
+
+    const metrics = getDashboardMetrics([patient], [], september2026);
+    const collectedEntries = getCollectedIncomeEntries([patient], september2026);
+    const pendingEntries = getPendingCollections([patient], september2026);
+
+    expect(metrics).toMatchObject({
+      incomeAmount: 400_000,
+      pendingAmount: 500_000,
+      pendingCases: 2
+    });
+    expect(collectedEntries).toHaveLength(2);
+    expect(collectedEntries.reduce((sum, entry) => sum + entry.paidAmount, 0)).toBe(400_000);
+    expect(collectedEntries.every((entry) => entry.date.startsWith("2026-09"))).toBe(true);
+    expect(pendingEntries.map((entry) => entry.pendingAmount).sort((left, right) => left - right)).toEqual([
+      200_000,
+      300_000
+    ]);
+  });
+
+  it("no inventa un cobro cuando paidAmount es cero aunque el pendiente guardado este viejo", () => {
+    const patient = makePatient({
+      id: "patient-with-zero-paid",
+      finances: [
+        {
+          ...makeFinance({
+            id: "finance-with-zero-paid",
+            date: "2026-09-18",
+            totalAmount: 500_000,
+            payments: []
+          }),
+          paidAmount: 0,
+          pendingAmount: 0
+        }
+      ]
+    });
+
+    expect(getDashboardMetrics([patient], [], september2026)).toMatchObject({
+      incomeAmount: 0,
+      pendingAmount: 500_000,
+      pendingCases: 1
+    });
+  });
+
+  it("acepta importes historicos localizados y evita que valores invalidos produzcan NaN", () => {
+    const localizedPayment = {
+      ...makePayment("localized-payment", "30/09/2026", 0),
+      amount: "Gs. 1.250.000" as unknown as number
+    };
+    const invalidPayments = [
+      { ...makePayment("nan-payment", "2026-09-30", 0), amount: Number.NaN },
+      { ...makePayment("infinite-payment", "2026-09-30", 0), amount: Number.POSITIVE_INFINITY },
+      { ...makePayment("negative-payment", "2026-09-30", 0), amount: -100_000 }
+    ];
+    const patient = makePatient({
+      id: "patient-with-imported-values",
+      finances: [
+        {
+          ...makeFinance({
+            id: "finance-with-imported-values",
+            date: "2026-9-30",
+            totalAmount: 1_250_000,
+            payments: []
+          }),
+          paidAmount: 0,
+          payments: [localizedPayment, ...invalidPayments]
+        }
+      ]
+    });
+    const expenses = [
+      {
+        ...makeExpense("localized-expense", "2026-09-30T23:59:59.000Z", 0, "general"),
+        amount: "250.000" as unknown as number
+      },
+      { ...makeExpense("invalid-expense", "2026-09-30", 0, "general"), amount: Number.NaN }
+    ];
+
+    const metrics = getDashboardMetrics([patient], expenses, september2026);
+
+    expect(metrics).toMatchObject({
+      incomeAmount: 1_250_000,
+      pendingAmount: 0,
+      expensesAmount: 250_000,
+      netAmount: 1_000_000
+    });
+    expect(Object.values(metrics).every(Number.isFinite)).toBe(true);
+  });
+
+  it("recalcula el pendiente desde monto y pagos aunque el valor guardado haya quedado viejo", () => {
+    const baseFinance = makeFinance({
+      id: "finance-1",
+      date: "2026-09-10",
+      totalAmount: 300_000,
+      payments: [makePayment("payment-1", "2026-09-10", 100_000)]
+    });
+    const originalPatient = makePatient({
+      id: "patient-1",
+      finances: [{ ...baseFinance, pendingAmount: 999_999 }]
+    });
+    const updatedPatient = makePatient({
+      id: "patient-1",
+      finances: [{ ...baseFinance, totalAmount: 450_000, pendingAmount: 999_999 }]
+    });
+
+    expect(getDashboardMetrics([originalPatient], [], september2026).pendingAmount).toBe(200_000);
+    expect(getDashboardMetrics([updatedPatient], [], september2026).pendingAmount).toBe(350_000);
   });
 });

@@ -8,10 +8,15 @@ import {
   signOut,
   type User
 } from "firebase/auth";
-import { getDatabase, onValue, ref, remove, set } from "firebase/database";
+import { get, getDatabase, onValue, ref, remove, runTransaction, set } from "firebase/database";
 import { normalizeBudgetStatus, sortBudgetsByDateDesc, syncBudgetEntry } from "./budgets";
 import { normalizeParaguayPhone, toIsoDate } from "./date";
-import { createLegacyPayments, sortFinancesByActivity, syncFinanceEntry } from "./financeEntries";
+import {
+  createLegacyPayments,
+  relocateFinanceDateLinkedPayments,
+  sortFinancesByActivity,
+  syncFinanceEntry
+} from "./financeEntries";
 import type { Expense, ExpenseScope, FinanceTone, Patient } from "../types/clinic";
 
 const firebaseConfig = {
@@ -78,6 +83,70 @@ function getLocalTodayKey(): string {
   return toIsoDate(new Date());
 }
 
+function buildIsoDate(year: number, month: number, day: number): string | null {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    year < 1000 ||
+    year > 9999 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > new Date(year, month, 0).getDate()
+  ) {
+    return null;
+  }
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseStoredDate(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : toIsoDate(value);
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const timestamp = Math.abs(value) < 100_000_000_000 ? value * 1000 : value;
+    const parsedDate = new Date(timestamp);
+    return Number.isNaN(parsedDate.getTime()) ? null : toIsoDate(parsedDate);
+  }
+
+  if (typeof value !== "string") return null;
+
+  const rawValue = value.trim();
+  if (!rawValue) return null;
+
+  const isoMatch = rawValue.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s].*)?$/);
+  if (isoMatch) {
+    return buildIsoDate(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
+  }
+
+  const localMatch = rawValue.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s].*)?$/);
+  if (localMatch) {
+    return buildIsoDate(Number(localMatch[3]), Number(localMatch[2]), Number(localMatch[1]));
+  }
+
+  if (/^\d{10,13}$/.test(rawValue)) {
+    return parseStoredDate(Number(rawValue));
+  }
+
+  return null;
+}
+
+export function normalizeStoredDate(value: unknown, fallbackDate = getLocalTodayKey()): string {
+  return parseStoredDate(value) ?? parseStoredDate(fallbackDate) ?? getLocalTodayKey();
+}
+
+function normalizeFirstStoredDate(values: unknown[], fallbackDate = ""): string {
+  for (const value of values) {
+    const normalizedDate = parseStoredDate(value);
+    if (normalizedDate) return normalizedDate;
+  }
+
+  return parseStoredDate(fallbackDate) ?? "";
+}
+
 export function normalizeStoredAmount(value: unknown): number {
   if (typeof value === "number") {
     return Number.isFinite(value) && value > 0 ? value : 0;
@@ -119,6 +188,25 @@ export function normalizeStoredAmount(value: unknown): number {
   const amount = Number(normalizedValue);
 
   return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function isValidStoredAmount(value: unknown): boolean {
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0;
+  if (typeof value !== "string") return false;
+
+  const rawValue = value.trim();
+  if (
+    !rawValue ||
+    rawValue.includes("-") ||
+    (rawValue.includes("(") && rawValue.includes(")"))
+  ) {
+    return false;
+  }
+
+  const digits = rawValue.replace(/[^\d]/g, "");
+  if (!digits) return false;
+
+  return normalizeStoredAmount(rawValue) > 0 || /^0+$/.test(digits);
 }
 
 function reserveUniqueId(candidate: unknown, fallbackId: string, usedIds: Set<string>): string {
@@ -176,7 +264,7 @@ function normalizeExpense(
   rawId: string,
   rawExpense: Record<string, unknown>,
   fallbackScope: ExpenseScope = "general",
-  fallbackDate = getLocalTodayKey()
+  fallbackDate = ""
 ): Expense {
   const scope =
     rawExpense.scope === "patient" || rawExpense.scope === "general"
@@ -185,7 +273,10 @@ function normalizeExpense(
 
   return {
     id: rawId,
-    date: String(rawExpense.date || fallbackDate).slice(0, 10),
+    date: normalizeFirstStoredDate(
+      [rawExpense.date, rawExpense.fecha, rawExpense.expenseDate, rawExpense.createdAt],
+      fallbackDate
+    ),
     concept: String(rawExpense.concept || "Sin concepto"),
     category: String(rawExpense.category || "General"),
     amount: normalizeStoredAmount(rawExpense.amount),
@@ -204,58 +295,194 @@ function normalizeExpense(
   };
 }
 
-function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): Patient {
-  const fallbackDate = getLocalTodayKey();
+function areEquivalentExpenses(left: Expense, right: Expense): boolean {
+  return (
+    left.date === right.date &&
+    left.concept === right.concept &&
+    left.category === right.category &&
+    left.amount === right.amount &&
+    left.description === right.description &&
+    left.scope === right.scope &&
+    left.linkedTreatmentId === right.linkedTreatmentId &&
+    left.paymentMethod === right.paymentMethod &&
+    left.vendor === right.vendor &&
+    left.marketingType === right.marketingType &&
+    left.isMarketing === right.isMarketing
+  );
+}
+
+export function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): Patient {
+  const fallbackDate = normalizeFirstStoredDate(
+    [rawPatient.createdAt, rawPatient.lastVisit],
+    ""
+  );
+  const treatments = normalizeFirebaseCollection<Patient["treatments"][number]>(
+    rawPatient.treatments,
+    "treatment"
+  ).map((treatment) => ({
+    ...treatment,
+    date: normalizeFirstStoredDate(
+      [
+        treatment.date,
+        (treatment as unknown as Record<string, unknown>).fecha,
+        (treatment as unknown as Record<string, unknown>).createdAt
+      ],
+      fallbackDate
+    ),
+    practitioner: String(treatment.practitioner || ""),
+    totalAmount: normalizeStoredAmount(treatment.totalAmount),
+    paidAmount: normalizeStoredAmount(treatment.paidAmount),
+    pendingAmount: normalizeStoredAmount(treatment.pendingAmount),
+    linkedFinanceId: treatment.linkedFinanceId ? String(treatment.linkedFinanceId) : undefined
+  }));
+  const treatmentDates = new Map(treatments.map((treatment) => [treatment.id, treatment.date]));
+  const treatmentsByFinanceId = new Map<string, Patient["treatments"][number]>();
+  treatments.forEach((treatment) => {
+    if (treatment.linkedFinanceId && !treatmentsByFinanceId.has(treatment.linkedFinanceId)) {
+      treatmentsByFinanceId.set(treatment.linkedFinanceId, treatment);
+    }
+  });
   const rawFinances = normalizeFirebaseCollection<Record<string, unknown>>(rawPatient.finances, "finance");
   const finances = rawFinances.map((entry, index) => {
     const id = String(entry.id || `finance-${index + 1}`);
-    const normalizedPayments = normalizeFirebaseCollection<Record<string, unknown>>(
+    const explicitLinkedTreatmentId = entry.linkedTreatmentId
+      ? String(entry.linkedTreatmentId)
+      : undefined;
+    const inverselyLinkedTreatment = treatmentsByFinanceId.get(id);
+    const linkedTreatmentId = treatmentDates.has(explicitLinkedTreatmentId || "")
+      ? explicitLinkedTreatmentId
+      : inverselyLinkedTreatment?.id || explicitLinkedTreatmentId;
+    const previousFinanceDate = normalizeFirstStoredDate(
+      [entry.date, entry.fecha, entry.financeDate, entry.createdAt],
+      ""
+    );
+    const linkedTreatmentDate = linkedTreatmentId ? treatmentDates.get(linkedTreatmentId) : "";
+    const financeDate = linkedTreatmentDate || previousFinanceDate || fallbackDate;
+    const normalizedPaymentsBeforeDateRepair = normalizeFirebaseCollection<Record<string, unknown>>(
       entry.payments,
       `${id}-payment`
     )
       .map((payment, paymentIndex) => ({
         id: String(payment.id || `${id}-payment-${paymentIndex + 1}`),
-        date: String(payment.date || entry.date || fallbackDate).slice(0, 10),
+        date: normalizeFirstStoredDate(
+          [payment.date, payment.fecha, payment.paymentDate, payment.paidAt, payment.createdAt],
+          financeDate
+        ),
         amount: normalizeStoredAmount(payment.amount),
         method: String(payment.method || "Otro"),
         note: String(payment.note || ""),
         fromMarketing: Boolean(payment.fromMarketing)
       }))
       .filter((payment) => payment.amount > 0);
+    const normalizedPayments = relocateFinanceDateLinkedPayments(
+      {
+        id,
+        date: previousFinanceDate || financeDate,
+        payments: normalizedPaymentsBeforeDateRepair
+      },
+      financeDate
+    );
+    const totalAmount = normalizeStoredAmount(entry.totalAmount);
+    const storedPendingAmount = normalizeStoredAmount(entry.pendingAmount);
     const legacyPaidAmount = normalizeStoredAmount(entry.paidAmount);
-    const payments =
-      normalizedPayments.length > 0
-        ? normalizedPayments
-        : createLegacyPayments({
+    const hasStoredPaidAmount =
+      entry.paidAmount !== undefined &&
+      entry.paidAmount !== null &&
+      String(entry.paidAmount).trim() !== "";
+    const hasValidStoredPendingAmount =
+      entry.pendingAmount !== undefined &&
+      entry.pendingAmount !== null &&
+      isValidStoredAmount(entry.pendingAmount) &&
+      storedPendingAmount <= totalAmount;
+    const inferredPaidAmount = hasValidStoredPendingAmount
+      ? Math.max(totalAmount - storedPendingAmount, 0)
+      : 0;
+    const fallbackPaidAmount = hasStoredPaidAmount ? legacyPaidAmount : inferredPaidAmount;
+    const usedPaymentIds = new Set(normalizedPayments.map((payment) => payment.id));
+    const legacyPayments =
+      normalizedPayments.length === 0
+        ? createLegacyPayments({
             id,
-            date: String(entry.date || fallbackDate).slice(0, 10),
-            paidAmount: legacyPaidAmount,
+            date: financeDate,
+            paidAmount: fallbackPaidAmount,
             description: String(entry.description || "")
-          });
+          }).map((payment) => ({
+            ...payment,
+            id: reserveUniqueId(payment.id, `${id}-legacy-payment`, usedPaymentIds)
+          }))
+        : [];
+    const payments = normalizedPayments.length > 0 ? normalizedPayments : legacyPayments;
 
     return syncFinanceEntry({
       id,
-      date: String(entry.date || fallbackDate).slice(0, 10),
+      date: financeDate,
       concept: String(entry.concept || "Sin concepto"),
       practitioner: entry.practitioner ? String(entry.practitioner) : undefined,
       status: String(entry.status || ""),
-      totalAmount: normalizeStoredAmount(entry.totalAmount),
+      totalAmount,
       paidAmount: legacyPaidAmount,
-      pendingAmount: normalizeStoredAmount(entry.pendingAmount),
+      pendingAmount: storedPendingAmount,
       description: String(entry.description || ""),
-      linkedTreatmentId: entry.linkedTreatmentId ? String(entry.linkedTreatmentId) : undefined,
+      linkedTreatmentId,
       payments
     });
   });
   const orderedFinances = sortFinancesByActivity(finances);
   const pendingTotal = orderedFinances.reduce((sum, entry) => sum + Number(entry.pendingAmount || 0), 0);
-  const patientExpensesSource = rawPatient.patientExpenses || rawPatient.expenses;
-  const patientExpenses = normalizeFirebaseCollection<Record<string, unknown>>(
-    patientExpensesSource,
+  const currentPatientExpenses = normalizeFirebaseCollection<Record<string, unknown>>(
+    rawPatient.patientExpenses,
     "patient-expense"
-  ).map((expense, index) =>
-    normalizeExpense(String(expense.id || `patient-expense-${index + 1}`), expense, "patient", fallbackDate)
   );
+  const legacyPatientExpenses = normalizeFirebaseCollection<Record<string, unknown>>(
+    rawPatient.expenses,
+    "legacy-patient-expense"
+  );
+  const usedExpenseIds = new Set<string>();
+  const normalizedCurrentExpenses = currentPatientExpenses.map((expense, index) => {
+    const id = reserveUniqueId(expense.id, `patient-expense-${index + 1}`, usedExpenseIds);
+    const linkedTreatmentDate = expense.linkedTreatmentId
+      ? treatmentDates.get(String(expense.linkedTreatmentId))
+      : "";
+    const normalizedExpense = normalizeExpense(
+      id,
+      expense,
+      "patient",
+      linkedTreatmentDate || fallbackDate
+    );
+
+    return linkedTreatmentDate
+      ? { ...normalizedExpense, date: linkedTreatmentDate }
+      : normalizedExpense;
+  });
+  const currentExpensesBySourceId = new Map(
+    normalizedCurrentExpenses.map((expense) => [expense.id, expense])
+  );
+  const normalizedLegacyExpenses = legacyPatientExpenses.flatMap((expense, index) => {
+    const sourceId = String(expense.id || `legacy-patient-expense-${index + 1}`);
+    const linkedTreatmentDate = expense.linkedTreatmentId
+      ? treatmentDates.get(String(expense.linkedTreatmentId))
+      : "";
+    const normalizedExpenseBeforeDateRepair = normalizeExpense(
+      sourceId,
+      expense,
+      "patient",
+      linkedTreatmentDate || fallbackDate
+    );
+    const normalizedExpense = linkedTreatmentDate
+      ? { ...normalizedExpenseBeforeDateRepair, date: linkedTreatmentDate }
+      : normalizedExpenseBeforeDateRepair;
+    const currentCopy = currentExpensesBySourceId.get(sourceId);
+
+    if (currentCopy && areEquivalentExpenses(currentCopy, normalizedExpense)) return [];
+
+    return [
+      {
+        ...normalizedExpense,
+        id: reserveUniqueId(sourceId, `legacy-patient-expense-${index + 1}`, usedExpenseIds)
+      }
+    ];
+  });
+  const patientExpenses = [...normalizedCurrentExpenses, ...normalizedLegacyExpenses];
   const budgets = sortBudgetsByDateDesc(
     normalizeFirebaseCollection<Record<string, unknown>>(rawPatient.budgets, "budget").map((budget, index) =>
       syncBudgetEntry({
@@ -283,22 +510,17 @@ function normalizePatient(rawId: string, rawPatient: Record<string, unknown>): P
     fullName: String(rawPatient.fullName || rawPatient.name || "Paciente sin nombre"),
     phone: normalizeParaguayPhone(String(rawPatient.phone || "")),
     cedula: String(rawPatient.cedula || rawPatient.identityNumber || rawPatient.idNumber || ""),
-    createdAt: String(rawPatient.createdAt || fallbackDate).slice(0, 10),
+    createdAt: fallbackDate,
     birthDate: String(rawPatient.birthDate || ""),
-    lastVisit: rawPatient.lastVisit ? String(rawPatient.lastVisit).slice(0, 10) : null,
+    lastVisit: rawPatient.lastVisit
+      ? (parseStoredDate(rawPatient.lastVisit) ?? fallbackDate) || null
+      : null,
     financeTone: inferFinanceTone(String(rawPatient.financeTone || rawPatient.financeStatus || ""), pendingTotal),
     occupation: String(rawPatient.occupation || ""),
     city: String(rawPatient.city || ""),
     tags: Array.isArray(rawPatient.tags) ? rawPatient.tags.map(String) : [],
     clinicalSummary: String(rawPatient.clinicalSummary || ""),
-    treatments: normalizeFirebaseCollection<Patient["treatments"][number]>(rawPatient.treatments, "treatment").map((treatment) => ({
-      ...treatment,
-      practitioner: String(treatment.practitioner || ""),
-      totalAmount: normalizeStoredAmount(treatment.totalAmount),
-      paidAmount: normalizeStoredAmount(treatment.paidAmount),
-      pendingAmount: normalizeStoredAmount(treatment.pendingAmount),
-      linkedFinanceId: treatment.linkedFinanceId ? String(treatment.linkedFinanceId) : undefined
-    })),
+    treatments,
     evolutions: normalizeFirebaseCollection<Patient["evolutions"][number]>(rawPatient.evolutions, "evolution"),
     followUps: normalizeFirebaseCollection<Patient["followUps"][number]>(rawPatient.followUps, "followup"),
     notes: normalizeFirebaseCollection<Patient["notes"][number]>(rawPatient.notes, "note"),
@@ -332,6 +554,208 @@ function serializePatient(patient: Patient): Omit<Patient, "id"> {
 function serializeExpense(expense: Expense): Omit<Expense, "id"> {
   const { id: _id, ...expensePayload } = expense;
   return stripUndefinedDeep(expensePayload);
+}
+
+type Identifiable = { id: string };
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => valuesEqual(value, right[index]));
+  }
+
+  if (
+    left &&
+    right &&
+    typeof left === "object" &&
+    typeof right === "object" &&
+    !Array.isArray(left) &&
+    !Array.isArray(right)
+  ) {
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const leftKeys = Object.keys(leftRecord);
+    const rightKeys = Object.keys(rightRecord);
+
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every((key) => hasOwn(rightRecord, key) && valuesEqual(leftRecord[key], rightRecord[key]))
+    );
+  }
+
+  return false;
+}
+
+function mergeObjectFields<T extends object>(previous: T | undefined, next: T, server: T | undefined): T {
+  if (!server) return next;
+
+  const previousRecord = (previous ?? {}) as Record<string, unknown>;
+  const nextRecord = next as Record<string, unknown>;
+  const mergedRecord = { ...(server as Record<string, unknown>) };
+
+  for (const [key, nextValue] of Object.entries(nextRecord)) {
+    if (!previous || !hasOwn(previousRecord, key) || !valuesEqual(nextValue, previousRecord[key])) {
+      mergedRecord[key] = nextValue;
+    }
+  }
+
+  if (previous) {
+    for (const key of Object.keys(previousRecord)) {
+      if (!hasOwn(nextRecord, key)) delete mergedRecord[key];
+    }
+  }
+
+  return mergedRecord as T;
+}
+
+function mergeCollectionById<T extends Identifiable>(
+  previousItems: T[],
+  nextItems: T[],
+  serverItems: T[],
+  mergeItem: (previous: T | undefined, next: T, server: T | undefined) => T = mergeObjectFields
+): T[] {
+  const previousById = new Map(previousItems.map((item) => [item.id, item]));
+  const nextById = new Map(nextItems.map((item) => [item.id, item]));
+  const serverById = new Map(serverItems.map((item) => [item.id, item]));
+  const orderedIds = [
+    ...nextItems.map((item) => item.id),
+    ...serverItems.map((item) => item.id).filter((id) => !nextById.has(id))
+  ];
+
+  return orderedIds.flatMap((id) => {
+    const previousItem = previousById.get(id);
+    const nextItem = nextById.get(id);
+    const serverItem = serverById.get(id);
+
+    // It existed before and no longer exists locally: this is an intentional deletion.
+    if (previousItem && !nextItem) return [];
+
+    // It only exists on the server: preserve a concurrent addition.
+    if (!nextItem && serverItem) return [serverItem];
+    if (!nextItem) return [];
+
+    // If another client deleted an unchanged item, keep that server-side deletion.
+    if (previousItem && !serverItem && valuesEqual(previousItem, nextItem)) return [];
+
+    return [mergeItem(previousItem, nextItem, serverItem)];
+  });
+}
+
+function mergeFinanceEntry(
+  previous: Patient["finances"][number] | undefined,
+  next: Patient["finances"][number],
+  server: Patient["finances"][number] | undefined
+): Patient["finances"][number] {
+  const merged = mergeObjectFields(previous, next, server);
+  const synced = syncFinanceEntry({
+    ...merged,
+    payments: mergeCollectionById(previous?.payments ?? [], next.payments, server?.payments ?? [])
+  });
+  const serverOverage = server ? Math.max(server.paidAmount - server.totalAmount, 0) : 0;
+  const mergedOverage = Math.max(synced.paidAmount - synced.totalAmount, 0);
+
+  if (mergedOverage > serverOverage) {
+    throw new Error(
+      `Conflicto de cobros en "${synced.concept}": los pagos concurrentes superan el total registrado.`
+    );
+  }
+
+  return synced;
+}
+
+function mergeBudgetEntry(
+  previous: Patient["budgets"][number] | undefined,
+  next: Patient["budgets"][number],
+  server: Patient["budgets"][number] | undefined
+): Patient["budgets"][number] {
+  return {
+    ...mergeObjectFields(previous, next, server),
+    items: mergeCollectionById(previous?.items ?? [], next.items, server?.items ?? [])
+  };
+}
+
+function deriveFinanceTone(finances: Patient["finances"]): FinanceTone {
+  if (finances.length === 0) return "review";
+
+  const pendingAmount = finances.reduce((sum, entry) => sum + entry.pendingAmount, 0);
+  const paidAmount = finances.reduce((sum, entry) => sum + entry.paidAmount, 0);
+  if (pendingAmount === 0) return "balanced";
+  if (paidAmount > 0) return "partial";
+  return "pending";
+}
+
+function syncTreatmentsFromFinances(
+  treatments: Patient["treatments"],
+  finances: Patient["finances"]
+): Patient["treatments"] {
+  return [...treatments]
+    .map((treatment) => {
+      const linkedFinance = finances.find(
+        (entry) => entry.id === treatment.linkedFinanceId || entry.linkedTreatmentId === treatment.id
+      );
+      if (!linkedFinance) return treatment;
+
+      return {
+        ...treatment,
+        totalAmount: linkedFinance.totalAmount,
+        paidAmount: linkedFinance.paidAmount,
+        pendingAmount: linkedFinance.pendingAmount
+      };
+    })
+    .sort((left, right) => right.date.localeCompare(left.date));
+}
+
+/**
+ * Applies a local patient change over the latest server snapshot. Collections are
+ * merged by stable IDs so two saves made from the same original patient do not
+ * overwrite independent records. Local removals are kept as intentional deletes.
+ */
+export function mergePatientChanges(previous: Patient, next: Patient, server: Patient): Patient {
+  const merged = mergeObjectFields(previous, next, server);
+  const finances = sortFinancesByActivity(
+    mergeCollectionById(previous.finances, next.finances, server.finances, mergeFinanceEntry)
+  );
+  const treatments = syncTreatmentsFromFinances(
+    mergeCollectionById(previous.treatments, next.treatments, server.treatments),
+    finances
+  );
+
+  return {
+    ...merged,
+    lastVisit: treatments[0]?.date ?? merged.lastVisit ?? null,
+    financeTone: deriveFinanceTone(finances),
+    treatments,
+    evolutions: mergeCollectionById(previous.evolutions, next.evolutions, server.evolutions),
+    followUps: mergeCollectionById(previous.followUps, next.followUps, server.followUps),
+    notes: mergeCollectionById(previous.notes, next.notes, server.notes),
+    budgets: mergeCollectionById(previous.budgets, next.budgets, server.budgets, mergeBudgetEntry),
+    finances,
+    patientExpenses: mergeCollectionById(
+      previous.patientExpenses,
+      next.patientExpenses,
+      server.patientExpenses
+    )
+  };
+}
+
+export function resolvePatientTransactionValue(
+  patient: Patient,
+  previousPatient: Patient | undefined,
+  currentValue: unknown
+): Omit<Patient, "id"> {
+  if (!previousPatient) return serializePatient(patient);
+
+  if (!currentValue || typeof currentValue !== "object" || Array.isArray(currentValue)) {
+    throw new Error("La ficha del paciente fue eliminada mientras se guardaban los cambios.");
+  }
+
+  const serverPatient = normalizePatient(patient.id, currentValue as Record<string, unknown>);
+  return serializePatient(mergePatientChanges(previousPatient, patient, serverPatient));
 }
 
 export function subscribeAuth(
@@ -419,9 +843,20 @@ export function subscribeServerTimeOffset(
   );
 }
 
-export async function savePatient(patient: Patient) {
+export async function savePatient(patient: Patient, previousPatient?: Patient) {
   const database = ensureDatabase();
-  await set(ref(database, `odontologia/pacientes/${patient.id}`), serializePatient(patient));
+  const patientRef = ref(database, `odontologia/pacientes/${patient.id}`);
+
+  if (previousPatient) {
+    const existingSnapshot = await get(patientRef);
+    if (!existingSnapshot.exists()) {
+      throw new Error("La ficha del paciente fue eliminada mientras se guardaban los cambios.");
+    }
+  }
+
+  await runTransaction(patientRef, (currentValue) =>
+    resolvePatientTransactionValue(patient, previousPatient, currentValue)
+  );
 }
 
 export async function deletePatient(patientId: string) {

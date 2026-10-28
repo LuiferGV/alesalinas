@@ -34,6 +34,8 @@ import {
   createPaymentEntry,
   describeFinanceStatus,
   getPaymentsTotal,
+  relocateFinanceDateLinkedPayments,
+  relocateTreatmentDateLinkedExpenses,
   removePaymentFromFinances,
   replacePaymentInFinances,
   sortFinancesByActivity,
@@ -226,7 +228,10 @@ function buildTreatmentFinanceEntry(
 ): FinanceEntry {
   const totalAmount = toAmount(values.totalAmount);
   const practitioner = normalizePractitionerName(values.practitioner);
-  const currentPayments = existingFinance?.payments ?? [];
+  const financeDate = values.date || todayKey();
+  const currentPayments = existingFinance
+    ? relocateFinanceDateLinkedPayments(existingFinance, financeDate)
+    : [];
   const existingPaidAmount = currentPayments.reduce((sum, payment) => sum + payment.amount, 0);
   const createPaymentDelta = !existingFinance
     ? Math.min(toAmount(values.paidAmount), totalAmount)
@@ -236,7 +241,7 @@ function buildTreatmentFinanceEntry(
       ? [
           createPaymentEntry({
             id: createId("payment"),
-            date: values.date || todayKey(),
+            date: financeDate,
             amount: createPaymentDelta,
             method: "Efectivo",
             note: "Pago registrado junto con la atencion.",
@@ -248,7 +253,7 @@ function buildTreatmentFinanceEntry(
 
   return syncFinanceEntry({
     id: existingFinance?.id ?? createId("finance"),
-    date: values.date || todayKey(),
+    date: financeDate,
     concept: values.detail.trim(),
     practitioner,
     totalAmount,
@@ -720,7 +725,11 @@ export default function App() {
     const nextPatients = previousPatients.map((patient) => (patient.id === patientId ? nextPatient : patient));
 
     setClinicPatients(nextPatients);
-    void persistFirebaseChange(() => savePatient(nextPatient), successMessage, () => setClinicPatients(previousPatients));
+    void persistFirebaseChange(
+      () => savePatient(nextPatient, currentPatient),
+      successMessage,
+      () => setClinicPatients(previousPatients)
+    );
   };
 
   const applyExpenseMutation = (
@@ -920,7 +929,7 @@ export default function App() {
     closeModals();
 
     void persistFirebaseChange(
-      () => savePatient(normalized),
+      () => savePatient(normalized, existingPatient ?? undefined),
       patientId ? "Ficha actualizada." : "Paciente creado.",
       () => {
         setClinicPatients(previousPatients);
@@ -1141,7 +1150,15 @@ export default function App() {
           return {
             ...patient,
             treatments: syncedTreatments,
-            finances: nextFinances
+            finances: nextFinances,
+            patientExpenses: existingTreatment
+              ? relocateTreatmentDateLinkedExpenses(
+                  patient.patientExpenses,
+                  treatmentId,
+                  existingTreatment.date,
+                  nextItem.date
+                )
+              : patient.patientExpenses
           };
         },
         itemId ? "Atencion y cobro actualizados." : "Atencion y cobro guardados."
@@ -1203,6 +1220,7 @@ export default function App() {
       const existingFinance = itemId ? currentPatient?.finances.find((entry) => entry.id === itemId) ?? null : null;
       const totalAmount = toAmount(values.totalAmount);
       const practitioner = normalizePractitionerName(values.practitioner);
+      const financeDate = values.date || todayKey();
       const initialPaymentAmount = itemId ? 0 : Math.min(toAmount(values.initialPaymentAmount), totalAmount);
       const recordedPaymentsTotal = existingFinance ? getPaymentsTotal(existingFinance.payments) : 0;
 
@@ -1215,7 +1233,7 @@ export default function App() {
 
       const nextItem = syncFinanceEntry({
         id: itemId ?? createId("finance"),
-        date: values.date || todayKey(),
+        date: financeDate,
         concept: values.concept.trim(),
         practitioner,
         status: describeFinanceStatus(totalAmount, existingFinance?.paidAmount ?? initialPaymentAmount),
@@ -1226,12 +1244,12 @@ export default function App() {
         linkedTreatmentId: existingFinance?.linkedTreatmentId,
         payments:
           itemId && existingFinance
-            ? existingFinance.payments
+            ? relocateFinanceDateLinkedPayments(existingFinance, financeDate)
             : initialPaymentAmount > 0
               ? [
                 createPaymentEntry({
                   id: createId("payment"),
-                  date: values.date || todayKey(),
+                  date: financeDate,
                   amount: initialPaymentAmount,
                   method: "Efectivo",
                   note: "Pago inicial registrado junto con el cargo.",

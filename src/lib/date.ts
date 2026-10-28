@@ -21,8 +21,57 @@ export interface MonthRange {
   endMonth: string;
 }
 
-function parseLocalDate(value: string): Date {
-  const [year, month, day] = value.split("-").map(Number);
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1) return false;
+
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+/**
+ * Converts the date shapes used by current and historical records to a local
+ * calendar key. No timezone conversion is performed, so a stored day cannot
+ * move to the previous/next month while calculating financial periods.
+ */
+export function normalizeIsoDate(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : toIsoDate(value);
+  }
+
+  if (typeof value !== "string") return null;
+
+  const rawValue = value.trim();
+  if (!rawValue) return null;
+
+  // ISO dates (including timestamps), unpadded legacy dates and YYYY/MM/DD.
+  const yearFirstMatch = rawValue.match(/^(\d{4})[-/](\d{1,2})(?:[-/](\d{1,2}))?(?:$|[T\s])/);
+  if (yearFirstMatch) {
+    const year = Number(yearFirstMatch[1]);
+    const month = Number(yearFirstMatch[2]);
+    const day = Number(yearFirstMatch[3] ?? 1);
+    if (!isValidCalendarDate(year, month, day)) return null;
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  // Older exports commonly used the Paraguayan DD/MM/YYYY representation.
+  const dayFirstMatch = rawValue.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dayFirstMatch) {
+    const day = Number(dayFirstMatch[1]);
+    const month = Number(dayFirstMatch[2]);
+    const year = Number(dayFirstMatch[3]);
+    if (!isValidCalendarDate(year, month, day)) return null;
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  return null;
+}
+
+function parseLocalDate(value: unknown): Date | null {
+  const normalizedDate = normalizeIsoDate(value);
+  if (!normalizedDate) return null;
+
+  const [year, month, day] = normalizedDate.split("-").map(Number);
   return new Date(year, month - 1, day);
 }
 
@@ -50,8 +99,8 @@ export function addMonths(baseDate: Date, amount: number): string {
 }
 
 export function formatDate(value: string | null): string {
-  if (!value) return "Sin registro";
-  return shortDateFormatter.format(parseLocalDate(value));
+  const date = parseLocalDate(value);
+  return date ? shortDateFormatter.format(date) : "Sin registro";
 }
 
 export function formatGs(amount: number): string {
@@ -71,8 +120,23 @@ function compareMonthKeys(left: string, right: string): number {
   return left.localeCompare(right);
 }
 
+function normalizeMonthKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+
+  const match = value.trim().match(/^(\d{4})-(\d{1,2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || year < 1 || year > 9999 || month < 1 || month > 12) return null;
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
+}
+
 export function isSameMonth(isoDate: string, monthKey: string): boolean {
-  return isoDate.slice(0, 7) === monthKey;
+  const normalizedDate = normalizeIsoDate(isoDate);
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  return Boolean(normalizedDate && normalizedMonth && normalizedDate.slice(0, 7) === normalizedMonth);
 }
 
 export function shiftMonthKey(monthKey: string, amount: number): string {
@@ -82,18 +146,31 @@ export function shiftMonthKey(monthKey: string, amount: number): string {
 }
 
 export function normalizeMonthRange(startMonth: string, endMonth: string): MonthRange {
-  return compareMonthKeys(startMonth, endMonth) <= 0
-    ? { startMonth, endMonth }
-    : { startMonth: endMonth, endMonth: startMonth };
+  const normalizedStart = normalizeMonthKey(startMonth) ?? startMonth;
+  const normalizedEnd = normalizeMonthKey(endMonth) ?? endMonth;
+
+  return compareMonthKeys(normalizedStart, normalizedEnd) <= 0
+    ? { startMonth: normalizedStart, endMonth: normalizedEnd }
+    : { startMonth: normalizedEnd, endMonth: normalizedStart };
 }
 
-export function isDateWithinMonthRange(isoDate: string, range: MonthRange): boolean {
-  const targetMonth = isoDate.slice(0, 7);
-  return compareMonthKeys(targetMonth, range.startMonth) >= 0 && compareMonthKeys(targetMonth, range.endMonth) <= 0;
+export function isDateWithinMonthRange(dateValue: unknown, range: MonthRange): boolean {
+  const normalizedDate = normalizeIsoDate(dateValue);
+  const startMonth = normalizeMonthKey(range.startMonth);
+  const endMonth = normalizeMonthKey(range.endMonth);
+  if (!normalizedDate || !startMonth || !endMonth) return false;
+
+  const normalizedRange = normalizeMonthRange(startMonth, endMonth);
+  const targetMonth = normalizedDate.slice(0, 7);
+  return (
+    compareMonthKeys(targetMonth, normalizedRange.startMonth) >= 0 &&
+    compareMonthKeys(targetMonth, normalizedRange.endMonth) <= 0
+  );
 }
 
 export function getDaysDiff(isoDate: string, now = new Date()): number {
   const target = parseLocalDate(isoDate);
+  if (!target) return Number.NaN;
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const diffMs = target.getTime() - today.getTime();
   return Math.round(diffMs / 86400000);

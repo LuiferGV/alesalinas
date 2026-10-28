@@ -1,4 +1,11 @@
-import { formatDate, formatGs, getDaysDiff, isDateWithinMonthRange, type MonthRange } from "./date";
+import {
+  formatDate,
+  formatGs,
+  getDaysDiff,
+  isDateWithinMonthRange,
+  normalizeIsoDate,
+  type MonthRange
+} from "./date";
 import { getFinanceActivityDate } from "./financeEntries";
 import { getUniquePractitionerNames, normalizePractitionerName } from "./practitioners";
 import type {
@@ -9,8 +16,108 @@ import type {
   FinanceEntry,
   FollowUp,
   FollowUpBucket,
-  Patient
+  Patient,
+  PaymentEntry
 } from "../types/clinic";
+
+function asArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Historical imports may contain amounts as localized strings. Calculations
+ * should never be poisoned by NaN/Infinity or by an invalid negative amount.
+ */
+function getSafeAmount(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.max(value, 0) : 0;
+  }
+
+  if (typeof value !== "string") return 0;
+
+  const rawValue = value.trim();
+  if (!rawValue || rawValue.startsWith("-") || /^\(.*\)$/.test(rawValue)) return 0;
+
+  if (/^\+?\d+$/.test(rawValue)) return Number(rawValue);
+
+  const numericValue = rawValue
+    .replace(/(?:gs\.?|pyg)/gi, "")
+    .replace(/\s/g, "")
+    .replace(/[^\d.,+-]/g, "");
+  if (!numericValue || numericValue.startsWith("-")) return 0;
+
+  const separators = numericValue.match(/[.,]/g) ?? [];
+  let normalizedValue = numericValue;
+
+  if (separators.length > 0) {
+    const separator = separators[0]!;
+    const sameSeparator = separators.every((current) => current === separator);
+    const groups = sameSeparator ? numericValue.split(separator) : [];
+
+    // Guarani amounts are integers and are commonly stored with 3-digit
+    // thousands groups (30.350.000 or 30,350,000).
+    if (sameSeparator && groups.length > 1 && groups.slice(1).every((group) => group.length === 3)) {
+      normalizedValue = groups.join("");
+    } else if (numericValue.includes(".") && numericValue.includes(",")) {
+      const decimalSeparator = numericValue.lastIndexOf(",") > numericValue.lastIndexOf(".") ? "," : ".";
+      const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+      normalizedValue = numericValue.split(thousandsSeparator).join("").replace(decimalSeparator, ".");
+    } else {
+      normalizedValue = numericValue.replace(",", ".");
+    }
+  }
+
+  const parsedAmount = Number(normalizedValue);
+  return Number.isFinite(parsedAmount) ? Math.max(parsedAmount, 0) : 0;
+}
+
+type EffectivePayment = PaymentEntry & { amount: number; date: string };
+
+function getEffectivePayments(entry: FinanceEntry): EffectivePayment[] {
+  const entryDate = normalizeIsoDate(entry.date) ?? "";
+  const payments = asArray(entry.payments)
+    .map((payment, index) => ({
+      ...payment,
+      id: payment.id || `${entry.id}-payment-${index + 1}`,
+      date: normalizeIsoDate(payment.date) ?? entryDate,
+      amount: getSafeAmount(payment.amount),
+      method: payment.method?.trim() || "Otro",
+      note: payment.note || ""
+    }))
+    .filter((payment) => payment.amount > 0);
+
+  // Once detailed payments exist they are the source of truth. Falling back to
+  // a stale aggregate in that case would undo a payment correction or deletion.
+  if (payments.length > 0) return payments;
+
+  // Typed/normalized entries always carry paidAmount. A stored zero is a real
+  // value, not evidence that `total - pending` should be invented here. Legacy
+  // inference is done during Firebase normalization, where field presence and
+  // validity can be checked safely.
+  const legacyPaidAmount = getSafeAmount(entry.paidAmount);
+
+  if (legacyPaidAmount === 0) return [];
+
+  return [
+    {
+      id: `${entry.id}-legacy-payment-balance`,
+      date: entryDate,
+      amount: legacyPaidAmount,
+      method: "Importado",
+      note: entry.description || "Saldo cobrado importado desde un registro anterior."
+    }
+  ];
+}
+
+function getEffectivePaidAmount(entry: FinanceEntry): number {
+  return getEffectivePayments(entry).reduce((sum, payment) => sum + payment.amount, 0);
+}
+
+function getEffectivePendingAmount(entry: FinanceEntry): number {
+  const totalAmount = getSafeAmount(entry.totalAmount);
+  if (totalAmount > 0) return Math.max(totalAmount - getEffectivePaidAmount(entry), 0);
+  return getSafeAmount(entry.pendingAmount);
+}
 
 function getAlertBucket(daysDiff: number): FollowUpBucket {
   if (daysDiff < 0) return "vencido";
@@ -66,26 +173,26 @@ export function getDashboardMetrics(
   expenses: Expense[],
   selectedPeriod: MonthRange
 ): DashboardMetrics {
-  const treatmentsCount = patients
-    .flatMap((patient) => patient.treatments)
+  const treatmentsCount = asArray(patients)
+    .flatMap((patient) => asArray(patient.treatments))
     .filter((item) => isDateWithinMonthRange(item.date, selectedPeriod)).length;
 
-  const financialEntries = patients.flatMap((patient) => patient.finances);
+  const financialEntries = asArray(patients).flatMap((patient) => asArray(patient.finances));
   const incomeAmount = financialEntries
-    .flatMap((entry) => entry.payments)
+    .flatMap(getEffectivePayments)
     .filter((payment) => isDateWithinMonthRange(payment.date, selectedPeriod))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
   const pendingEntries = financialEntries.filter(
-    (entry) => isDateWithinMonthRange(entry.date, selectedPeriod) && entry.pendingAmount > 0
+    (entry) => isDateWithinMonthRange(entry.date, selectedPeriod) && getEffectivePendingAmount(entry) > 0
   );
-  const pendingAmount = pendingEntries.reduce((sum, entry) => sum + entry.pendingAmount, 0);
+  const pendingAmount = pendingEntries.reduce((sum, entry) => sum + getEffectivePendingAmount(entry), 0);
   const expensesAmount = getAllExpenses(patients, expenses)
     .filter((entry) => isDateWithinMonthRange(entry.date, selectedPeriod))
-    .reduce((sum, entry) => sum + entry.amount, 0);
+    .reduce((sum, entry) => sum + getSafeAmount(entry.amount), 0);
 
   return {
-    patientsCount: patients.length,
+    patientsCount: asArray(patients).length,
     treatmentsCount,
     incomeAmount,
     pendingAmount,
@@ -96,22 +203,19 @@ export function getDashboardMetrics(
 }
 
 export function getPatientPendingTotal(patient: Patient): number {
-  return patient.finances.reduce((sum, entry) => sum + entry.pendingAmount, 0);
+  return asArray(patient.finances).reduce((sum, entry) => sum + getEffectivePendingAmount(entry), 0);
 }
 
 export function getPatientPaidTotal(patient: Patient): number {
-  return patient.finances.reduce(
-    (sum, entry) => sum + entry.payments.reduce((entrySum, payment) => entrySum + payment.amount, 0),
-    0
-  );
+  return asArray(patient.finances).reduce((sum, entry) => sum + getEffectivePaidAmount(entry), 0);
 }
 
 export function getPatientTotalBilled(patient: Patient): number {
-  return patient.finances.reduce((sum, entry) => sum + entry.totalAmount, 0);
+  return asArray(patient.finances).reduce((sum, entry) => sum + getSafeAmount(entry.totalAmount), 0);
 }
 
 export function getPatientExpenseTotal(patient: Patient): number {
-  return patient.patientExpenses.reduce((sum, entry) => sum + entry.amount, 0);
+  return asArray(patient.patientExpenses).reduce((sum, entry) => sum + getSafeAmount(entry.amount), 0);
 }
 
 export function getPatientNetCollected(patient: Patient): number {
@@ -123,13 +227,13 @@ export function getPatientProjectedNet(patient: Patient): number {
 }
 
 export function getPatientLatestTreatment(patient: Patient) {
-  return [...patient.treatments].sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
+  return [...asArray(patient.treatments)].sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
 }
 
 export function getPatientLatestPayment(patient: Patient) {
-  return patient.finances
+  return asArray(patient.finances)
     .flatMap((entry) =>
-      entry.payments.map((payment) => ({
+      getEffectivePayments(entry).map((payment) => ({
         ...payment,
         concept: entry.concept
       }))
@@ -138,7 +242,7 @@ export function getPatientLatestPayment(patient: Patient) {
 }
 
 export function getPatientDoctors(patient: Patient) {
-  return getUniquePractitionerNames(patient.treatments.map((treatment) => treatment.practitioner));
+  return getUniquePractitionerNames(asArray(patient.treatments).map((treatment) => treatment.practitioner));
 }
 
 export function getPatientLatestPractitioner(patient: Patient) {
@@ -147,35 +251,38 @@ export function getPatientLatestPractitioner(patient: Patient) {
 }
 
 export function getPatientLatestEvolution(patient: Patient) {
-  return [...patient.evolutions].sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
+  return [...asArray(patient.evolutions)].sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
 }
 
 export function getPatientLatestNote(patient: Patient) {
-  return [...patient.notes].sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
+  return [...asArray(patient.notes)].sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
 }
 
 export function getPendingCollections(patients: Patient[], selectedPeriod: MonthRange) {
-  return patients
+  return asArray(patients)
     .flatMap((patient) =>
-      patient.finances
-        .filter((entry) => isDateWithinMonthRange(entry.date, selectedPeriod) && entry.pendingAmount > 0)
+      asArray(patient.finances)
+        .filter(
+          (entry) =>
+            isDateWithinMonthRange(entry.date, selectedPeriod) && getEffectivePendingAmount(entry) > 0
+        )
         .map((entry) => ({
           patientId: patient.id,
           patientName: patient.fullName,
           financeId: entry.id,
           concept: entry.concept,
-          date: entry.date,
-          pendingAmount: entry.pendingAmount
+          date: normalizeIsoDate(entry.date) ?? entry.date,
+          pendingAmount: getEffectivePendingAmount(entry)
         }))
     )
     .sort((left, right) => right.pendingAmount - left.pendingAmount);
 }
 
 export function getCollectedIncomeEntries(patients: Patient[], selectedPeriod: MonthRange) {
-  return patients
+  return asArray(patients)
     .flatMap((patient) =>
-      patient.finances.flatMap((entry) =>
-        entry.payments
+      asArray(patient.finances).flatMap((entry) =>
+        getEffectivePayments(entry)
           .filter((payment) => isDateWithinMonthRange(payment.date, selectedPeriod))
           .map((payment) => ({
             patientId: patient.id,
@@ -193,14 +300,18 @@ export function getCollectedIncomeEntries(patients: Patient[], selectedPeriod: M
 }
 
 export function getAllExpenses(patients: Patient[], expenses: Expense[]) {
-  const generalExpenses = expenses.map((expense) => ({
+  const generalExpenses = asArray(expenses).map((expense) => ({
     ...expense,
+    date: normalizeIsoDate(expense.date) ?? expense.date,
+    amount: getSafeAmount(expense.amount),
     scope: expense.scope ?? "general"
   }));
 
-  const patientExpenses = patients.flatMap((patient) =>
-    patient.patientExpenses.map((expense) => ({
+  const patientExpenses = asArray(patients).flatMap((patient) =>
+    asArray(patient.patientExpenses).map((expense) => ({
       ...expense,
+      date: normalizeIsoDate(expense.date) ?? expense.date,
+      amount: getSafeAmount(expense.amount),
       scope: "patient" as const,
       patientId: patient.id,
       patientName: patient.fullName
@@ -217,9 +328,13 @@ export function getPeriodExpenses(patients: Patient[], expenses: Expense[], sele
 }
 
 export function getFinanceStatusLabel(entry: FinanceEntry): string {
-  if (entry.pendingAmount === 0 && entry.totalAmount > 0) return "Cobrado";
-  if (entry.totalAmount === 0) return "Sin cobro";
-  if (entry.paidAmount > 0) return "Pago parcial";
+  const totalAmount = getSafeAmount(entry.totalAmount);
+  const paidAmount = getEffectivePaidAmount(entry);
+  const pendingAmount = getEffectivePendingAmount(entry);
+
+  if (pendingAmount === 0 && totalAmount > 0) return "Cobrado";
+  if (totalAmount === 0) return "Sin cobro";
+  if (paidAmount > 0) return "Pago parcial";
   return "Pendiente";
 }
 
